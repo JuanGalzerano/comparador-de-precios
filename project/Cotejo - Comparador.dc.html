@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="nocturne.css" />
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+<style>
+  ::placeholder { color: color-mix(in srgb, var(--color-text) 38%, transparent); }
+  a:hover { color: var(--color-accent-300); }
+  input, select, button { font-family: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+  .dim { color: color-mix(in srgb, var(--color-text) 52%, transparent); }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: var(--color-bg);">
+
+  <!-- ============================================================
+       HEADER — buscar es la única entrada. No hay pestaña de resultados:
+       la búsqueda reemplaza el contenido de la misma vista.
+       BACKEND: GET /sites/MLA/search?q=… (API pública de MercadoLibre,
+       sin auth) -> se normaliza en /api/search y se agrupa por producto.
+       ============================================================ -->
+  <header style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); box-shadow: 0 1px 0 var(--color-divider);">
+    <div style="max-width: 1240px; margin: 0 auto; padding: var(--space-4) var(--space-8); display: flex; align-items: center; gap: var(--space-8);">
+      <div onClick="{{ goHome }}" style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer;">
+        <i class="ph ph-scales" style="font-size: 20px; color: var(--color-accent);"></i>
+        <span style="font-size: 17px; font-weight: 500; letter-spacing: -0.01em;">Cotejo</span>
+      </div>
+
+      <div style="flex: 1; max-width: 560px; position: relative;">
+        <i class="ph ph-magnifying-glass" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 15px; color: color-mix(in srgb, var(--color-text) 42%, transparent);"></i>
+        <input class="input" value="{{ q }}" onChange="{{ onQuery }}" onKeyDown="{{ onEnter }}" placeholder="Buscar un producto" style="padding-left: 32px;" />
+      </div>
+
+      <!-- MENÚ — cada entrada es una ruta propia del sitio:
+           /ofertas          (precios insuperables: mejor precio histórico por producto)
+           /para-vos         (recomendaciones; requiere consentimiento de cookies)
+           /como-funciona    (explica el score)
+           BACKEND: ver los comentarios de cada vista más abajo. -->
+      <nav style="margin-left: auto; display: flex; align-items: center; gap: var(--space-6); font-size: 13px;">
+        <sc-for list="{{ menu }}" as="m" hint-placeholder-count="3">
+          <a href="#" onClick="{{ m.go }}" style="{{ m.style }}">{{ m.label }}</a>
+        </sc-for>
+        <!-- BACKEND: sesión propia (OAuth/email) para guardar comparaciones y alertas -->
+        <span class="dim">Ingresar</span>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       VISTA 1 — BUSCAR / RESULTADOS
+       Los resultados son PRODUCTOS (clusters de publicaciones), no
+       publicaciones sueltas: catalog_product_id cuando existe, y si no,
+       matching propio por marca + modelo + atributos.
+       ============================================================ -->
+  <sc-if value="{{ isSearch }}" hint-placeholder-val="{{ false }}">
+    <main style="max-width: 1240px; margin: 0 auto; padding: var(--space-8) var(--space-8) 80px; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 56px; align-items: start;">
+      <div>
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="padding: 56px 0 var(--space-8); max-width: 620px;">
+              <h1 style="font-size: 44px; margin-bottom: var(--space-4); text-wrap: pretty;">Buscá un producto y comparalo en todas sus publicaciones.</h1>
+              <p class="dim" style="font-size: 16px; margin: 0;">Precio con envío, cuotas, vendedor, garantía y opiniones — y el link para comprarlo donde está publicado.</p>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: var(--space-3); max-width: 520px;">
+              <input class="input" value="{{ q }}" onChange="{{ onQuery }}" onKeyDown="{{ onEnter }}" placeholder="iPhone 13 128GB, Citroën C4 Picasso, remera Nike…" style="min-height: 42px; font-size: 15px;" />
+              <button class="btn btn-primary" onClick="{{ doSearch }}" style="min-height: 42px;">Buscar</button>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-4); font-size: 13px; align-items: baseline;">
+              <span class="dim">Ejemplos:</span>
+              <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="3">
+                <a href="#" onClick="{{ ex.pick }}">{{ ex.label }}</a>
+              </sc-for>
+            </div>
+
+            <div style="margin-top: 56px; padding-top: var(--space-8); border-top: 1px solid var(--color-divider); max-width: 760px; display: flex; flex-direction: column; gap: var(--space-4);">
+              <sc-for list="{{ howItWorks }}" as="h" hint-placeholder-count="3">
+                <div style="display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-8); align-items: baseline;">
+                  <div style="font-size: 14px; font-weight: 500;">{{ h.t }}</div>
+                  <div class="dim" style="font-size: 14px; text-wrap: pretty;">{{ h.d }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showResults }}" hint-placeholder-val="{{ false }}">
+          <section style="margin-top: 56px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--space-4); border-bottom: 1px solid var(--color-divider); padding-bottom: var(--space-3);">
+              <h4 style="margin: 0;">{{ q }}</h4>
+              <span class="dim" style="font-size: 13px;">{{ resultsMeta }}</span>
+            </div>
+
+            <div>
+              <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+                <div onClick="{{ g.open }}" style="{{ g.rowStyle }}">
+                  <!-- IMAGEN: campo `thumbnail` / `pictures[0]` del item -->
+                  <div style="aspect-ratio: 1; border-radius: var(--radius-sm); background: repeating-linear-gradient(135deg, var(--color-neutral-900) 0 6px, var(--color-bg) 6px 12px); display: flex; align-items: flex-end; padding: 6px;">
+                    <span style="font-size: 9px; color: color-mix(in srgb, var(--color-text) 40%, transparent);">{{ g.imgHint }}</span>
+                  </div>
+
+                  <div style="min-width: 0;">
+                    <div style="font-size: 16px; font-weight: 500; letter-spacing: -0.01em;">{{ g.title }}</div>
+                    <div class="dim" style="font-size: 13px; margin-top: 3px;">{{ g.subtitle }}</div>
+                    <div class="dim num" style="font-size: 13px; margin-top: var(--space-3);">{{ g.detail }}</div>
+                  </div>
+
+                  <div style="text-align: right;">
+                    <div class="num" style="font-size: 22px; letter-spacing: -0.02em;">{{ g.from }}</div>
+                    <div class="dim" style="font-size: 12px; margin-top: 2px;">la más barata de {{ g.count }}</div>
+                    <div style="font-size: 13px; margin-top: var(--space-3); color: var(--color-accent);">{{ g.spread }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </sc-if>
+      </div>
+
+      <!-- PUBLICIDAD — el sitio es gratuito y se sostiene con Google AdSense.
+           Slot lateral 300×250 fuera del recorrido de lectura de los datos.
+           HTML real: <ins class="adsbygoogle" data-ad-client="ca-pub-…" data-ad-slot="…"></ins> -->
+      <aside style="position: sticky; top: 92px;">
+        <div style="border: 1px solid var(--color-divider); border-radius: var(--radius-md); height: 250px; display: flex; align-items: center; justify-content: center; font-size: 12px;" class="dim">Espacio publicitario 300 × 250</div>
+        <p class="dim" style="font-size: 12px; margin-top: var(--space-3); line-height: 1.5;">Cotejo es gratis: no cobra comisión ni vende nada. Se sostiene con publicidad y te lleva a la publicación original para comprar.</p>
+      </aside>
+    </main>
+  </sc-if>
+
+  <!-- ============================================================
+       VISTA 2 — PRODUCTO. Arriba la recomendación y el link de compra;
+       al scrollear, la comparación lado a lado y la tabla completa.
+       BACKEND por producto:
+         GET /items?ids=…       -> precio, envío, cuotas, garantía (attributes)
+         GET /users/:seller_id  -> seller_reputation (level_id, power_seller_status)
+         GET /reviews/item/:id  -> rating y total (no siempre disponible)
+       Cache propio con TTL corto (precio ~1h) + historial de precios.
+       El CTA abre item.permalink en pestaña nueva y registra la salida.
+       ============================================================ -->
+  <sc-if value="{{ isProduct }}" hint-placeholder-val="{{ true }}">
+    <main style="max-width: 1240px; margin: 0 auto; padding: var(--space-6) var(--space-8) 80px; width: 100%;">
+
+      <a href="#" onClick="{{ goSearch }}" style="font-size: 13px; display: inline-flex; align-items: center; gap: 5px;"><i class="ph ph-arrow-left"></i> Volver a la búsqueda</a>
+
+      <!-- FICHA + RECOMENDACIÓN -->
+      <section style="display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 40px; align-items: start; margin-top: var(--space-6);">
+        <div style="aspect-ratio: 1; border-radius: var(--radius-md); background: repeating-linear-gradient(135deg, var(--color-neutral-900) 0 7px, var(--color-bg) 7px 14px); display: flex; align-items: flex-end; padding: var(--space-3);">
+          <span style="font-size: 11px; color: color-mix(in srgb, var(--color-text) 42%, transparent);">{{ product.imgHint }}</span>
+        </div>
+
+        <div>
+          <h2 style="margin-bottom: var(--space-2); text-wrap: pretty;">{{ product.title }}</h2>
+          <div class="dim" style="font-size: 13.5px;">{{ product.subtitle }}</div>
+
+          <div class="num" style="display: flex; gap: 40px; margin-top: var(--space-8); padding-bottom: var(--space-6); border-bottom: 1px solid var(--color-divider);">
+            <sc-for list="{{ product.stats }}" as="s" hint-placeholder-count="4">
+              <div>
+                <div class="dim" style="font-size: 12px; margin-bottom: 3px;">{{ s.k }}</div>
+                <div style="font-size: 20px; letter-spacing: -0.02em;">{{ s.v }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- La recomendación hace la cuenta por el usuario en vez de dejarle
+               tres chapitas para interpretar: una frase, el precio y el link. -->
+          <div style="margin-top: var(--space-6); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-8); align-items: end;">
+            <div>
+              <div style="font-size: 15px; line-height: 1.5; text-wrap: pretty;">{{ recoLine }}</div>
+              <div class="dim" style="font-size: 13px; margin-top: var(--space-2);">{{ recoWhy }}</div>
+            </div>
+            <a class="btn btn-primary" href="{{ recoLink }}" target="_blank" rel="noopener" style="min-height: 40px; white-space: nowrap;">Ver en el sitio oficial <i class="ph ph-arrow-square-out"></i></a>
+          </div>
+        </div>
+
+        <aside style="display: flex; flex-direction: column; gap: var(--space-6);">
+          <!-- PUBLICIDAD lateral en la ficha -->
+          <div style="border: 1px solid var(--color-divider); border-radius: var(--radius-md); height: 250px; display: flex; align-items: center; justify-content: center; font-size: 12px;" class="dim">Espacio publicitario 300 × 250</div>
+          <div>
+            <div class="dim" style="font-size: 12px; margin-bottom: var(--space-2);">Otros productos del prototipo</div>
+            <div style="display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start;">
+              <sc-for list="{{ productTabs }}" as="pt" hint-placeholder-count="3">
+                <a href="#" onClick="{{ pt.pick }}" style="{{ pt.style }}">{{ pt.label }}</a>
+              </sc-for>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <!-- COMPARACIÓN LADO A LADO -->
+      <section style="margin-top: 64px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--space-4);">
+          <h4 style="margin: 0;">Comparación lado a lado</h4>
+          <span class="dim" style="font-size: 12.5px;">{{ selectedMeta }}</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 148px repeat({{ colCount }}, minmax(0, 1fr)); border-top: 1px solid var(--color-divider);">
+          <div>
+            <div style="height: 116px;"></div>
+            <sc-for list="{{ rowLabels }}" as="rl" hint-placeholder-count="7">
+              <div class="dim" style="font-size: 12.5px; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); height: 56px; display: flex; align-items: center;">{{ rl }}</div>
+            </sc-for>
+            <div style="height: 68px; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);"></div>
+          </div>
+
+          <sc-for list="{{ columns }}" as="c" hint-placeholder-count="3">
+            <div style="{{ c.colStyle }}">
+              <div style="height: 116px; padding: var(--space-4) var(--space-4) var(--space-3); display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                  <div style="display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2);">
+                    <span style="font-size: 15px; font-weight: 500; line-height: 1.25;">{{ c.seller }}</span>
+                    <button class="btn btn-ghost" onClick="{{ c.remove }}" style="padding: 0; font-size: 12px;">quitar</button>
+                  </div>
+                  <div class="dim" style="font-size: 12px; margin-top: 3px;">{{ c.sellerNote }}</div>
+                </div>
+                <div>
+                  <div style="display: flex; align-items: baseline; gap: var(--space-2);">
+                    <span class="num" style="font-size: 17px;">{{ c.score }}</span>
+                    <span class="dim" style="font-size: 11.5px;">score</span>
+                  </div>
+                  <div style="height: 3px; background: var(--color-neutral-800); margin-top: 5px;">
+                    <div style="height: 3px; background: var(--color-accent); width: {{ c.scorePct }};"></div>
+                  </div>
+                </div>
+              </div>
+
+              <sc-for list="{{ c.cells }}" as="cell" hint-placeholder-count="7">
+                <div style="padding: 0 var(--space-4); height: 56px; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); display: flex; flex-direction: column; justify-content: center; gap: 1px;">
+                  <div class="num" style="font-size: 14px; color: {{ cell.color }};">{{ cell.v }}</div>
+                  <div class="dim" style="font-size: 11px;">{{ cell.note }}</div>
+                </div>
+              </sc-for>
+
+              <!-- SALIDA a la publicación original (item.permalink) -->
+              <div style="padding: var(--space-4); height: 68px; border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);">
+                <a class="btn btn-secondary btn-block" href="{{ c.permalink }}" target="_blank" rel="noopener" style="margin: 0;">Ir a la publicación <i class="ph ph-arrow-square-out"></i></a>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- PUBLICIDAD horizontal entre las dos vistas de datos -->
+      <div style="border: 1px solid var(--color-divider); border-radius: var(--radius-md); height: 90px; margin: 56px 0; display: flex; align-items: center; justify-content: center; font-size: 12px;" class="dim">Espacio publicitario 728 × 90</div>
+
+      <!-- TABLA COMPLETA -->
+      <section>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-4); flex-wrap: wrap;">
+          <h4 style="margin: 0;">Todas las publicaciones <span class="dim" style="font-size: 14px; font-weight: 400;">{{ listMeta }}</span></h4>
+          <div style="display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;">
+            <div class="seg">
+              <sc-for list="{{ conditions }}" as="cn" hint-placeholder-count="3">
+                <label class="seg-opt">
+                  <input type="radio" name="cond" checked="{{ cn.on }}" onChange="{{ cn.set }}" />
+                  <span>{{ cn.label }}</span>
+                </label>
+              </sc-for>
+            </div>
+            <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="4">
+              <label class="radio" style="font-size: 13px;">
+                <input type="checkbox" checked="{{ t.on }}" onChange="{{ t.toggle }}" />
+                <span class="dot"></span>{{ t.label }}
+              </label>
+            </sc-for>
+            <select class="input" value="{{ sort }}" onChange="{{ onSort }}" style="width: auto; cursor: pointer;">
+              <option value="score">Ordenar por score</option>
+              <option value="price">Ordenar por precio final</option>
+              <option value="rating">Ordenar por opiniones</option>
+              <option value="warranty">Ordenar por garantía</option>
+              <option value="seller">Ordenar por reputación</option>
+            </select>
+          </div>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width: 32px;"></th>
+              <th>Publicación</th>
+              <th style="width: 132px;">Precio final</th>
+              <th style="width: 116px;">Cuotas</th>
+              <th style="width: 136px;">Vendedor</th>
+              <th style="width: 100px;">Opiniones</th>
+              <th style="width: 104px;">Garantía</th>
+              <th style="width: 52px; text-align: right;">Score</th>
+              <th style="width: 104px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="8">
+              <tr>
+                <td>
+                  <input type="checkbox" checked="{{ r.selected }}" onChange="{{ r.toggle }}" style="accent-color: var(--color-accent); width: 14px; height: 14px; cursor: pointer;" />
+                </td>
+                <td style="min-width: 0;">
+                  <div style="display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap;">
+                    <span style="font-weight: 500;">{{ r.seller }}</span>
+                    <span style="font-size: 12px; color: var(--color-accent-300);">{{ r.mark }}</span>
+                  </div>
+                  <div class="dim" style="font-size: 12px; margin-top: 2px;">{{ r.title }}</div>
+                </td>
+                <td>
+                  <div class="num">{{ r.priceFmt }}</div>
+                  <div class="dim num" style="font-size: 11.5px; margin-top: 1px;">{{ r.shipNote }}</div>
+                </td>
+                <td>
+                  <div class="num" style="font-size: 13px;">{{ r.instMain }}</div>
+                  <div class="dim" style="font-size: 11.5px; margin-top: 1px;">{{ r.instNote }}</div>
+                </td>
+                <td>
+                  <div style="font-size: 13px;">{{ r.repLabel }}</div>
+                  <div class="dim num" style="font-size: 11.5px; margin-top: 1px;">{{ r.repNote }}</div>
+                </td>
+                <td>
+                  <div class="num" style="font-size: 13px;">{{ r.rating }}</div>
+                  <div class="dim num" style="font-size: 11.5px; margin-top: 1px;">{{ r.reviews }}</div>
+                </td>
+                <td>
+                  <div style="font-size: 13px;">{{ r.warranty }}</div>
+                  <div class="dim" style="font-size: 11.5px; margin-top: 1px;">{{ r.warrantyNote }}</div>
+                </td>
+                <td class="num" style="text-align: right;">{{ r.score }}</td>
+                <td style="text-align: right;">
+                  <a href="{{ r.permalink }}" target="_blank" rel="noopener" style="font-size: 12.5px; white-space: nowrap;">Ir a la publicación</a>
+                </td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+
+        <div style="margin-top: var(--space-6); display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); flex-wrap: wrap;">
+          <button class="btn btn-secondary">{{ moreLabel }}</button>
+          <p class="dim" style="font-size: 12.5px; max-width: 620px; margin: 0;">{{ scoreNote }}</p>
+        </div>
+      </section>
+    </main>
+  </sc-if>
+
+  <!-- ============================================================
+       VISTA 3 — PRECIOS INSUPERABLES  (/ofertas)
+       BACKEND: se calcula con el HISTORIAL, no con el precio de hoy.
+         tabla price_history(listing_id, price, shipping_cost, captured_at)
+         job cada hora -> por product_key: min_actual, p50_90d, min_90d
+         "insuperable" = min_actual <= p50_90d * (1 - umbral)  (umbral ~0.12)
+       Endpoint /api/deals?limit=50&min_drop=0.12 ordenado por drop_pct.
+       Solo publicaciones con vendedor de reputación >= gold, para no
+       destacar chollos de cuentas sin trayectoria.
+       ============================================================ -->
+  <sc-if value="{{ isDeals }}" hint-placeholder-val="{{ false }}">
+    <main style="max-width: 1240px; margin: 0 auto; padding: var(--space-8) var(--space-8) 80px; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 56px; align-items: start;">
+      <div>
+        <h2 style="margin-bottom: var(--space-3);">Precios insuperables</h2>
+        <p class="dim" style="font-size: 15px; max-width: 620px;">Publicaciones que hoy están por debajo de su precio habitual de los últimos 90 días, con vendedores de trayectoria. Se recalcula cada hora.</p>
+
+        <div style="margin-top: var(--space-8);">
+          <sc-for list="{{ deals }}" as="d" hint-placeholder-count="4">
+            <div onClick="{{ d.open }}" style="display: grid; grid-template-columns: 88px minmax(0, 1fr) 180px; gap: var(--space-6); align-items: center; padding: var(--space-4) 0; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); cursor: pointer;">
+              <div style="aspect-ratio: 1; border-radius: var(--radius-sm); background: repeating-linear-gradient(135deg, var(--color-neutral-900) 0 6px, var(--color-bg) 6px 12px);"></div>
+              <div style="min-width: 0;">
+                <div style="font-size: 15px; font-weight: 500;">{{ d.title }}</div>
+                <div class="dim" style="font-size: 13px; margin-top: 3px;">{{ d.seller }}</div>
+                <div class="dim num" style="font-size: 12.5px; margin-top: var(--space-2);">{{ d.history }}</div>
+              </div>
+              <div style="text-align: right;">
+                <div class="num" style="font-size: 20px;">{{ d.price }}</div>
+                <div class="num" style="font-size: 13px; color: var(--color-accent-300); margin-top: 2px;">{{ d.drop }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <!-- PUBLICIDAD -->
+      <aside style="position: sticky; top: 92px;">
+        <div class="dim" style="border: 1px solid var(--color-divider); border-radius: var(--radius-md); height: 250px; display: flex; align-items: center; justify-content: center; font-size: 12px;">Espacio publicitario 300 × 250</div>
+      </aside>
+    </main>
+  </sc-if>
+
+  <!-- ============================================================
+       VISTA 4 — PARA VOS  (/para-vos)
+       Recomendaciones. Requiere consentimiento previo (GDPR/ley 25.326):
+         cookie first-party `cotejo_cid` (anon_id, 180 días) + `cotejo_consent`
+         tabla user_event(anon_id, type: view|compare|exit, product_key,
+                          listing_id, ts)  ->  perfil por categoría
+         /api/recommendations : co-visitación (producto A -> B) + afinidad de
+         categoría + precio típico consultado. Sin consentimiento devuelve
+         solo lo popular del día (no personalizado).
+       ============================================================ -->
+  <sc-if value="{{ isForYou }}" hint-placeholder-val="{{ false }}">
+    <main style="max-width: 1240px; margin: 0 auto; padding: var(--space-8) var(--space-8) 80px; width: 100%; max-width: 900px;">
+      <h2 style="margin-bottom: var(--space-3);">Para vos</h2>
+
+      <sc-if value="{{ needsConsent }}" hint-placeholder-val="{{ true }}">
+        <div style="max-width: 560px;">
+          <p class="dim" style="font-size: 15px;">Todavía no personalizamos nada. Si activás las cookies de recomendación guardamos qué productos comparás — en este navegador, sin nombre ni email — y usamos eso para sugerirte productos y avisarte cuando bajan de precio.</p>
+          <div style="display: flex; gap: var(--space-3); margin-top: var(--space-6);">
+            <button class="btn btn-primary" onClick="{{ acceptCookies }}">Activar recomendaciones</button>
+            <button class="btn btn-secondary" onClick="{{ rejectCookies }}">No, gracias</button>
+          </div>
+          <p class="dim" style="font-size: 12.5px; margin-top: var(--space-4);">Podés desactivarlas cuando quieras. Sin cookies el comparador funciona igual.</p>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ hasConsent }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <p class="dim" style="font-size: 14px; max-width: 620px;">{{ profileLine }}</p>
+          <div style="margin-top: var(--space-8);">
+            <sc-for list="{{ recos }}" as="r" hint-placeholder-count="3">
+              <div onClick="{{ r.open }}" style="display: grid; grid-template-columns: 88px minmax(0, 1fr) 160px; gap: var(--space-6); align-items: center; padding: var(--space-4) 0; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); cursor: pointer;">
+                <div style="aspect-ratio: 1; border-radius: var(--radius-sm); background: repeating-linear-gradient(135deg, var(--color-neutral-900) 0 6px, var(--color-bg) 6px 12px);"></div>
+                <div style="min-width: 0;">
+                  <div style="font-size: 15px; font-weight: 500;">{{ r.title }}</div>
+                  <div class="dim" style="font-size: 13px; margin-top: 3px;">{{ r.why }}</div>
+                </div>
+                <div class="num" style="text-align: right; font-size: 18px;">{{ r.from }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <button class="btn btn-ghost" onClick="{{ rejectCookies }}" style="margin-top: var(--space-6);">Desactivar recomendaciones y borrar mi historial</button>
+        </div>
+      </sc-if>
+    </main>
+  </sc-if>
+
+  <!-- BANNER DE CONSENTIMIENTO — se muestra hasta que hay decisión.
+       BACKEND: guardar en cookie `cotejo_consent` = granted|denied (+ fecha)
+       y no cargar ads personalizados ni eventos hasta tenerla. -->
+  <sc-if value="{{ showCookieBar }}" hint-placeholder-val="{{ false }}">
+    <div style="position: sticky; bottom: 0; z-index: 30; background: var(--color-surface); box-shadow: 0 -1px 0 var(--color-divider);">
+      <div style="max-width: 1240px; margin: 0 auto; padding: var(--space-4) var(--space-8); display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap;">
+        <p class="dim" style="font-size: 13px; margin: 0; flex: 1; min-width: 280px;">Usamos cookies para medir el uso y, si lo permitís, para recomendarte productos según lo que comparás.</p>
+        <div style="display: flex; gap: var(--space-3);">
+          <button class="btn btn-secondary" onClick="{{ rejectCookies }}">Solo las necesarias</button>
+          <button class="btn btn-primary" onClick="{{ acceptCookies }}">Aceptar todas</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <footer style="margin-top: auto; box-shadow: 0 -1px 0 var(--color-divider);">
+    <div class="dim" style="max-width: 1240px; margin: 0 auto; padding: var(--space-6) var(--space-8); display: flex; justify-content: space-between; gap: var(--space-6); font-size: 12px;">
+      <span>Cotejo — datos de publicaciones públicas de MercadoLibre. Servicio gratuito sostenido con publicidad.</span>
+      <span class="num">{{ syncNote }}</span>
+    </div>
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;pesoPrecio&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.34,&quot;min&quot;:0,&quot;max&quot;:0.7,&quot;step&quot;:0.02,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Score&quot;},&quot;pesoGarantia&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.2,&quot;min&quot;:0,&quot;max&quot;:0.5,&quot;step&quot;:0.02,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Score&quot;},&quot;columnas&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:2,&quot;max&quot;:4,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Comparación&quot;}}">
+/* ============================================================================
+   COTEJO — comparador de publicaciones. UI sobre el design system Nocturne.
+
+   Los datos mock tienen la MISMA forma que devuelve la API pública de
+   MercadoLibre, así el backend es un mapeo 1:1.
+
+   Fase 1 (sin scraping, sin auth):
+     GET https://api.mercadolibre.com/sites/MLA/search?q=<query>&limit=50
+        -> results[]: { id, title, price, currency_id, condition, thumbnail,
+                        permalink, shipping:{free_shipping, logistic_type},
+                        installments:{quantity, amount, rate},
+                        seller:{id, nickname}, catalog_product_id, attributes[] }
+     GET /items?ids=MLA1,MLA2      (batch, hasta 20 ids)
+     GET /users/:seller_id         -> seller_reputation.{level_id, power_seller_status}
+     GET /reviews/item/:id         -> rating_average, total (no siempre disponible)
+     Garantía: attributes -> WARRANTY_TYPE / WARRANTY_TIME (texto libre: parsear
+     a { meses, tipo: oficial|vendedor|sin }).
+
+   Tabla `listing` sugerida:
+     id, product_key, seller_id, price, shipping_cost, final_price,
+     installments_qty, installments_amount, interest_free, seller_level,
+     seller_sales, official_store, rating, reviews_count, warranty_months,
+     warranty_type, condition, permalink, fetched_at
+   product_key = catalog_product_id, o hash(marca+modelo+atributos) si no hay.
+
+   Monetización: AdSense (slots marcados en el template). No hay afiliación:
+   el CTA manda al permalink original y solo se cuenta la salida.
+   ============================================================================ */
+
+class Component extends DCLogic {
+  state = {
+    view: 'product',
+    q: 'iPhone 13 128GB',
+    searched: true,
+    productId: 'iphone',
+    sort: 'score',
+    filters: { free: false, official: false, warranty: false },
+    condition: 'all',
+    /* consent: null = sin decidir, 'granted' | 'denied'.
+       En producción esto sale de la cookie `cotejo_consent`. */
+    consent: null,
+    selected: { iphone: ['MLA-8821', 'MLA-4410', 'MLA-9032'], picasso: ['MLA-7101', 'MLA-7744', 'MLA-7350'], remera: ['MLA-2210', 'MLA-2884', 'MLA-2015'] }
+  };
+
+  catalog() {
+    if (this._cat) return this._cat;
+    const L = (id, seller, title, price, ship, full, instQ, instAmt, free, level, sales, official, rating, reviews, warranty, wType, condition) =>
+      ({ id, seller, title, price, ship, full, instQ, instAmt, free, level, sales, official, rating, reviews, warranty, wType, condition, permalink: 'https://articulo.mercadolibre.com.ar/' + id });
+    this._cat = {
+      iphone: {
+        title: 'Apple iPhone 13 128 GB',
+        subtitle: 'Nuevo y usado · 31 publicaciones del mismo producto · catalog_product_id MLA22811322',
+        imgHint: '[ foto del producto — pictures[0] ]',
+        query: 'iPhone 13 128GB',
+        listings: [
+          L('MLA-8821', 'MacStation', 'iPhone 13 128GB Midnight — sellado', 1049000, 0, true, 12, 87416, true, 'platinum', 48200, 'Apple Premium Reseller', 4.9, 1840, 12, 'oficial', 'new'),
+          L('MLA-4410', 'Tecno Norte', 'Apple iPhone 13 128 GB azul medianoche', 989000, 0, true, 6, 164833, true, 'gold', 12400, null, 4.7, 612, 6, 'vendedor', 'new'),
+          L('MLA-9032', 'Frávega', 'iPhone 13 128GB — tienda oficial', 1079000, 0, false, 18, 59944, true, 'platinum', 210000, 'Frávega', 4.6, 5210, 12, 'oficial', 'new'),
+          L('MLA-3315', 'CeluMundo', 'iPhone 13 128GB nuevo caja cerrada', 962000, 18500, false, 3, 326833, false, 'green', 890, null, 4.2, 88, 3, 'vendedor', 'new'),
+          L('MLA-5560', 'iPlace', 'Apple iPhone 13 (128 GB) garantía oficial', 1035000, 0, true, 12, 86250, true, 'platinum', 33100, 'iPlace', 4.8, 2410, 12, 'oficial', 'new'),
+          L('MLA-6120', 'DistriTel', 'iPhone 13 128gb liberado importado', 934000, 22000, false, 1, 956000, false, 'silver', 340, null, 3.8, 41, 0, 'sin', 'new'),
+          L('MLA-7702', 'Musimundo', 'iPhone 13 128GB — tienda oficial', 1094000, 0, false, 12, 91166, true, 'platinum', 156000, 'Musimundo', 4.5, 3120, 12, 'oficial', 'new'),
+          L('MLA-2288', 'Reacondicionados AR', 'iPhone 13 128GB reacondicionado grado A', 728000, 0, true, 9, 80888, true, 'gold', 7600, null, 4.4, 430, 6, 'vendedor', 'used'),
+          L('MLA-1904', 'Punto Celular', 'iPhone 13 128 GB usado, 92% batería', 690000, 12000, false, 6, 117000, false, 'gold', 4200, null, 4.3, 205, 3, 'vendedor', 'used'),
+          L('MLA-6631', 'Garbarino', 'Apple iPhone 13 128GB negro', 1112000, 0, false, 24, 46333, false, 'gold', 98000, 'Garbarino', 4.1, 1980, 12, 'oficial', 'new')
+        ]
+      },
+      picasso: {
+        title: 'Citroën C4 Grand Picasso 1.6 THP',
+        subtitle: 'Usado · 22 publicaciones similares · agrupadas por matching propio (marca + modelo + año)',
+        imgHint: '[ foto del auto — pictures[0] ]',
+        query: 'Citroën C4 Picasso usado',
+        listings: [
+          L('MLA-7101', 'Autos del Oeste', '2015 · 118.000 km · Feel Pack, service oficial', 15900000, 0, false, 24, 795000, false, 'platinum', 1240, 'Concesionaria oficial', 4.7, 96, 12, 'oficial', 'used'),
+          L('MLA-7744', 'Marcos R.', '2013 · 164.000 km · particular, único dueño', 12400000, 0, false, 1, 12400000, false, 'green', 3, null, 0, 0, 0, 'sin', 'used'),
+          L('MLA-7350', 'Rossi Automotores', '2016 · 96.500 km · Exclusive, certificado', 17250000, 0, false, 36, 479166, false, 'gold', 640, null, 4.5, 58, 6, 'vendedor', 'used'),
+          L('MLA-7811', 'Car One', '2014 · 132.000 km · tienda oficial', 14100000, 0, false, 18, 783333, false, 'platinum', 5100, 'Car One', 4.4, 310, 12, 'oficial', 'used'),
+          L('MLA-7420', 'Julián P.', '2012 · 189.000 km · a reparar chapa', 10900000, 0, false, 1, 10900000, false, 'green', 1, null, 0, 0, 0, 'sin', 'used'),
+          L('MLA-7990', 'Multimarca Sur', '2015 · 121.000 km · permuta y financiación', 15200000, 0, false, 12, 1266666, false, 'gold', 420, null, 4.0, 22, 3, 'vendedor', 'used')
+        ]
+      },
+      remera: {
+        title: 'Remera Nike Sportswear Club — hombre',
+        subtitle: 'Nuevo · 30 publicaciones del mismo producto · variantes de talle y color',
+        imgHint: '[ foto de la prenda — pictures[0] ]',
+        query: 'remera Nike Sportswear Club',
+        listings: [
+          L('MLA-2210', 'Nike Store', 'Remera Nike Sportswear Club negra — tienda oficial', 42999, 0, true, 6, 7166, true, 'platinum', 320000, 'Nike', 4.8, 8900, 3, 'oficial', 'new'),
+          L('MLA-2884', 'Dexter', 'Remera Nike Club Tee blanca de algodón', 37500, 0, true, 3, 12500, true, 'platinum', 88000, 'Dexter', 4.6, 2140, 3, 'oficial', 'new'),
+          L('MLA-2015', 'Deportes Andes', 'Remera Nike hombre — talles S al XXL', 31900, 6500, false, 1, 38400, false, 'gold', 9400, null, 4.3, 380, 0, 'sin', 'new'),
+          L('MLA-2661', 'UrbanFit', 'Remera Nike Sportswear Club importada', 28900, 8900, false, 1, 37800, false, 'silver', 610, null, 3.6, 47, 0, 'sin', 'new'),
+          L('MLA-2733', 'Solo Deportes', 'Remera Nike Club Tee — tienda oficial', 39900, 0, true, 6, 6650, true, 'platinum', 142000, 'Solo Deportes', 4.7, 3600, 3, 'oficial', 'new'),
+          L('MLA-2492', 'OutletSport', 'Remera Nike negra talle L — última unidad', 24900, 7200, false, 1, 32100, false, 'green', 130, null, 3.2, 12, 0, 'sin', 'new')
+        ]
+      }
+    };
+    return this._cat;
+  }
+
+  money(n) { return '$ ' + Math.round(n).toLocaleString('es-AR'); }
+
+  /* SCORE COMPUESTO — portar tal cual al backend (columna calculada por
+     product_key + filtros: cada eje se normaliza contra el set visible). */
+  scoreOf(l, min, max) {
+    const final = l.price + l.ship;
+    const priceScore = max === min ? 1 : 1 - (final - min) / (max - min);
+    const repScore = { platinum: 1, gold: 0.78, silver: 0.5, green: 0.3 }[l.level] ?? 0.3;
+    const ratingScore = l.reviews === 0 ? 0.35 : (l.rating / 5) * Math.min(1, 0.55 + Math.log10(l.reviews + 1) / 4);
+    const warrScore = Math.min(1, l.warranty / 12) * (l.wType === 'oficial' ? 1 : l.wType === 'vendedor' ? 0.8 : 0);
+    const perkScore = (l.full ? 0.5 : 0) + (l.ship === 0 ? 0.3 : 0) + (l.free ? 0.2 : 0);
+    const w = { price: this.props.pesoPrecio ?? 0.34, rep: 0.2, rating: 0.18, warranty: this.props.pesoGarantia ?? 0.2, perks: 0.08 };
+    const t = w.price + w.rep + w.rating + w.warranty + w.perks;
+    return Math.round(((priceScore * w.price + repScore * w.rep + ratingScore * w.rating + warrScore * w.warranty + perkScore * w.perks) / t) * 100);
+  }
+
+  repLabel(l) {
+    return l.official ? 'Tienda oficial' : { platinum: 'MercadoLíder Platinum', gold: 'MercadoLíder Gold', silver: 'MercadoLíder', green: 'Sin trayectoria' }[l.level];
+  }
+
+  toggleSel(id, slots) {
+    this.setState(st => {
+      const cur = st.selected[st.productId] || [];
+      const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id].slice(-slots);
+      return { selected: { ...st.selected, [st.productId]: next } };
+    });
+  }
+
+  renderVals() {
+    const s = this.state, cat = this.catalog(), product = cat[s.productId];
+    const slots = Math.max(2, Math.min(4, this.props.columnas ?? 3));
+    const text = 'var(--color-text)';
+    const accent = 'var(--color-accent-300)';
+    const dim = 'color-mix(in srgb, var(--color-text) 52%, transparent)';
+
+    const pass = l =>
+      (!s.filters.free || l.ship === 0) &&
+      (!s.filters.official || !!l.official) &&
+      (!s.filters.warranty || l.warranty >= 6) &&
+      (s.condition === 'all' || l.condition === s.condition);
+
+    const set = product.listings.filter(pass);
+    const finals = set.map(l => l.price + l.ship);
+    const min = finals.length ? Math.min(...finals) : 0;
+    const max = finals.length ? Math.max(...finals) : 0;
+    const scored = set.map(l => ({ ...l, final: l.price + l.ship, score: this.scoreOf(l, min, max) }));
+
+    const cmp = {
+      score: (a, b) => b.score - a.score,
+      price: (a, b) => a.final - b.final,
+      rating: (a, b) => b.rating - a.rating || b.reviews - a.reviews,
+      warranty: (a, b) => b.warranty - a.warranty,
+      seller: (a, b) => b.sales - a.sales
+    }[s.sort];
+    const sorted = [...scored].sort(cmp);
+
+    const best = scored.length ? scored.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+    const cheapest = scored.length ? scored.reduce((a, b) => (b.final < a.final ? b : a)) : null;
+    const longestWarr = scored.length ? scored.reduce((a, b) => (b.warranty > a.warranty ? b : a)) : null;
+    const mostReviewed = scored.length ? scored.reduce((a, b) => (b.reviews > a.reviews ? b : a)) : null;
+
+    /* marca textual en la fila, en vez de chapitas de color */
+    const markOf = l => {
+      if (best && l.id === best.id) return 'recomendada';
+      if (cheapest && l.id === cheapest.id) return 'la más barata';
+      if (longestWarr && l.id === longestWarr.id && l.warranty > 0) return 'más garantía';
+      if (mostReviewed && l.id === mostReviewed.id) return 'más opiniones';
+      return '';
+    };
+
+    const sel = (s.selected[s.productId] || []).filter(id => scored.some(l => l.id === id)).slice(0, slots);
+
+    const rows = sorted.map(l => ({
+      selected: sel.includes(l.id),
+      toggle: () => this.toggleSel(l.id, slots),
+      seller: l.seller,
+      title: l.title,
+      mark: markOf(l),
+      permalink: l.permalink,
+      score: l.score,
+      priceFmt: this.money(l.final),
+      shipNote: l.ship === 0 ? (l.full ? 'envío gratis · FULL' : 'envío gratis') : 'incluye ' + this.money(l.ship) + ' de envío',
+      instMain: l.instQ > 1 ? l.instQ + ' × ' + this.money(l.instAmt) : 'sin cuotas',
+      instNote: l.instQ > 1 ? (l.free ? 'sin interés' : 'con interés') : 'pago único',
+      repLabel: this.repLabel(l),
+      repNote: l.sales >= 1000 ? Math.round(l.sales / 1000) + 'k ventas' : l.sales + ' ventas',
+      rating: l.reviews ? l.rating.toFixed(1) : '—',
+      reviews: l.reviews ? l.reviews.toLocaleString('es-AR') + ' opiniones' : 'sin opiniones',
+      warranty: l.warranty ? l.warranty + ' meses' : 'sin garantía',
+      warrantyNote: l.wType === 'oficial' ? 'de fábrica' : l.wType === 'vendedor' ? 'del vendedor' : '—'
+    }));
+
+    const columns = sel.map(id => {
+      const l = scored.find(x => x.id === id);
+      const isBest = best && l.id === best.id;
+      return {
+        seller: l.seller,
+        sellerNote: (l.official ? l.official + ' · ' : '') + (isBest ? 'recomendada' : this.repLabel(l)),
+        score: l.score,
+        scorePct: l.score + '%',
+        permalink: l.permalink,
+        remove: () => this.toggleSel(l.id, slots),
+        colStyle: 'min-width: 0; border-left: 1px solid var(--color-divider);' + (isBest ? ' box-shadow: inset 0 2px 0 var(--color-accent);' : ''),
+        cells: [
+          { v: this.money(l.final), note: l.final === min ? 'la más barata del set' : this.money(l.final - min) + ' más que la más barata', color: l.final === min ? accent : text },
+          { v: l.instQ > 1 ? l.instQ + ' × ' + this.money(l.instAmt) : 'sin cuotas', note: l.instQ > 1 ? (l.free ? 'sin interés' : 'con interés') : 'pago único', color: text },
+          { v: l.ship === 0 ? 'gratis' : this.money(l.ship), note: l.full ? 'FULL, llega mañana' : 'envío del vendedor', color: text },
+          { v: this.repLabel(l), note: l.level === 'green' ? 'poca trayectoria' : 'reclamos bajos', color: l.level === 'green' ? dim : text },
+          { v: l.sales.toLocaleString('es-AR'), note: 'ventas del vendedor', color: text },
+          { v: l.reviews ? l.rating.toFixed(1) + ' / 5' : 'sin datos', note: l.reviews ? l.reviews.toLocaleString('es-AR') + ' opiniones' : 'la API no trae reviews acá', color: l.reviews ? text : dim },
+          { v: l.warranty ? l.warranty + ' meses' : 'sin garantía', note: l.wType === 'oficial' ? 'garantía de fábrica' : l.wType === 'vendedor' ? 'garantía del vendedor' : 'sin cobertura', color: l.warranty ? text : dim }
+        ]
+      };
+    });
+
+    const groups = Object.keys(cat).map(k => {
+      const p = cat[k], fs = p.listings.map(l => l.price + l.ship);
+      return {
+        title: p.title,
+        subtitle: p.subtitle.split(' · ').slice(0, 2).join(' · '),
+        imgHint: p.imgHint,
+        detail: p.listings.filter(l => !!l.official).length + ' tiendas oficiales · ' + p.listings.filter(l => l.ship === 0).length + ' con envío gratis · ' + p.listings.filter(l => l.warranty >= 6).length + ' con 6+ meses de garantía',
+        from: this.money(Math.min(...fs)),
+        count: p.listings.length + ' publicaciones',
+        spread: 'hasta ' + this.money(Math.max(...fs) - Math.min(...fs)) + ' de diferencia',
+        rowStyle: 'display: grid; grid-template-columns: 88px minmax(0, 1fr) 210px; gap: var(--space-6); align-items: center; padding: var(--space-4) 0; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent); cursor: pointer;',
+        open: () => this.setState({ view: 'product', productId: k, q: p.query })
+      };
+    });
+
+    return {
+      q: s.q,
+      onQuery: e => this.setState({ q: e.target.value }),
+      onEnter: e => { if (e.key === 'Enter') this.setState({ view: 'search', searched: true }); },
+      doSearch: () => this.setState({ view: 'search', searched: true }),
+      goSearch: () => this.setState({ view: 'search' }),
+      goHome: () => this.setState({ view: 'home' }),
+      isHome: s.view === 'home',
+      isDeals: s.view === 'deals',
+      isForYou: s.view === 'foryou',
+      menu: [
+        { label: 'Precios insuperables', view: 'deals' },
+        { label: 'Para vos', view: 'foryou' },
+        { label: 'Cómo funciona', view: 'home' }
+      ].map(m => ({ label: m.label, go: e => { e.preventDefault(); this.setState({ view: m.view }); }, style: 'font-size: 13px;' + (s.view === m.view ? '' : ' color: var(--color-text);') })),
+
+      /* PRECIOS INSUPERABLES — acá se simula lo que en producción sale de
+         price_history: precio actual vs mediana de 90 días. */
+      deals: Object.keys(cat).map(k => {
+        const p = cat[k];
+        const ls = p.listings.map(l => ({ ...l, final: l.price + l.ship })).filter(l => l.level === 'platinum' || l.level === 'gold');
+        const cheap = ls.reduce((a, b) => (b.final < a.final ? b : a));
+        const median = [...ls].sort((a, b) => a.final - b.final)[Math.floor(ls.length / 2)].final;
+        return {
+          key: k,
+          drop: '−' + Math.round((1 - cheap.final / median) * 100) + '% vs habitual',
+          dropPct: 1 - cheap.final / median,
+          title: p.title,
+          seller: cheap.seller + ' · ' + this.repLabel(cheap),
+          history: 'mediana 90 días ' + this.money(median) + ' · mínimo histórico ' + this.money(Math.round(cheap.final * 0.97)),
+          price: this.money(cheap.final),
+          open: () => this.setState({ view: 'product', productId: k, q: p.query })
+        };
+      }).sort((a, b) => b.dropPct - a.dropPct),
+
+      /* PARA VOS — con consentimiento. El "porqué" de cada recomendación es
+         parte del patrón: la sugerencia se explica, no aparece sola. */
+      needsConsent: s.consent !== 'granted',
+      hasConsent: s.consent === 'granted',
+      showCookieBar: s.consent === null,
+      acceptCookies: () => this.setState({ consent: 'granted' }),
+      rejectCookies: () => this.setState({ consent: 'denied' }),
+      profileLine: 'Basado en 3 productos que comparaste en este navegador. No guardamos nombre ni email.',
+      recos: Object.keys(cat).filter(k => k !== s.productId).map(k => {
+        const p = cat[k], fs = p.listings.map(l => l.price + l.ship);
+        return {
+          title: p.title,
+          why: k === 'iphone' ? 'Porque comparaste celulares de gama alta' : k === 'remera' ? 'Porque miraste indumentaria deportiva' : 'Porque comparaste vehículos usados',
+          from: this.money(Math.min(...fs)),
+          open: () => this.setState({ view: 'product', productId: k, q: p.query })
+        };
+      }),
+
+      isSearch: s.view === 'home' || s.view === 'search',
+      isProduct: s.view === 'product',
+      showResults: s.view === 'search',
+      howItWorks: [
+        { t: 'Buscás una vez', d: 'Agrupamos las publicaciones que venden el mismo producto en lugar de devolverte treinta filas sueltas.' },
+        { t: 'Comparamos por vos', d: 'Precio con envío, cuotas sin interés, reputación del vendedor, garantía real en meses y opiniones, en una sola tabla.' },
+        { t: 'Comprás donde ya está', d: 'Cotejo no vende ni cobra comisión: te manda a la publicación original. El servicio es gratuito y se sostiene con publicidad.' }
+      ],
+
+      examples: [
+        { label: 'iPhone 13 128GB', pick: () => this.setState({ view: 'search', searched: true, productId: 'iphone', q: 'iPhone 13 128GB' }) },
+        { label: 'Citroën C4 Picasso usado', pick: () => this.setState({ view: 'search', searched: true, productId: 'picasso', q: 'Citroën C4 Picasso usado' }) },
+        { label: 'remera Nike', pick: () => this.setState({ view: 'search', searched: true, productId: 'remera', q: 'remera Nike' }) }
+      ],
+
+      product: {
+        ...product,
+        stats: [
+          { k: 'Publicaciones', v: String(product.listings.length) },
+          { k: 'Más barata', v: cheapest ? this.money(cheapest.final) : '—' },
+          { k: 'Más cara', v: max ? this.money(max) : '—' },
+          { k: 'Diferencia', v: max ? this.money(max - min) : '—' }
+        ]
+      },
+      productTabs: Object.keys(cat).filter(k => k !== s.productId).map(k => ({
+        label: cat[k].title,
+        pick: () => this.setState({ productId: k, q: cat[k].query }),
+        style: 'font-size: 13px;'
+      })),
+
+      recoLine: best ? 'Conviene ' + best.seller + ' a ' + this.money(best.final) + (best.final === min ? ', que además es la más barata.' : ', ' + this.money(best.final - min) + ' más que la más barata.') : 'Ninguna publicación pasa los filtros.',
+      recoWhy: best ? [this.repLabel(best), best.warranty ? best.warranty + ' meses de garantía ' + (best.wType === 'oficial' ? 'de fábrica' : 'del vendedor') : 'sin garantía', best.reviews ? best.rating.toFixed(1) + ' con ' + best.reviews.toLocaleString('es-AR') + ' opiniones' : 'sin opiniones', best.ship === 0 ? 'envío gratis' : 'envío ' + this.money(best.ship)].join(' · ') : 'Probá quitando algún filtro.',
+      recoLink: best ? best.permalink : '#',
+
+      resultsMeta: groups.length + ' productos agrupados',
+      groups,
+
+      conditions: [
+        { key: 'all', label: 'Todas' },
+        { key: 'new', label: 'Nuevas' },
+        { key: 'used', label: 'Usadas' }
+      ].map(c => ({ label: c.label, on: s.condition === c.key, set: () => this.setState({ condition: c.key }) })),
+
+      toggles: [
+        { key: 'free', label: 'Envío gratis' },
+        { key: 'official', label: 'Tienda oficial' },
+        { key: 'warranty', label: 'Garantía 6m+' }
+      ].map(t => ({ label: t.label, on: s.filters[t.key], toggle: () => this.setState(st => ({ filters: { ...st.filters, [t.key]: !st.filters[t.key] } })) })),
+
+      rows,
+      rowLabels: ['Precio final', 'Cuotas', 'Envío', 'Vendedor', 'Ventas', 'Opiniones', 'Garantía'],
+      columns,
+      colCount: Math.max(1, columns.length),
+      sort: s.sort,
+      onSort: e => this.setState({ sort: e.target.value }),
+      selectedMeta: columns.length + ' de ' + slots + ' columnas · tildá filas en la tabla para cambiarlas',
+      listMeta: rows.length + ' de ' + product.listings.length + ' tras los filtros',
+      moreLabel: 'Ver ' + Math.max(0, product.listings.length - rows.length + 12) + ' publicaciones más',
+      scoreNote: 'El score normaliza cada eje contra las publicaciones visibles: precio final ' + Math.round((this.props.pesoPrecio ?? 0.34) * 100) + '%, garantía ' + Math.round((this.props.pesoGarantia ?? 0.2) * 100) + '%, reputación 20%, opiniones 18%, envío 8%. Cambia al filtrar.',
+      syncNote: 'precios actualizados hace 42 min'
+    };
+  }
+}
+
+</script>
+</body>
+</html>
