@@ -1,0 +1,30 @@
+import Link from "next/link";
+import { getCurrentUser } from "@/lib/session";
+
+/** Bloque de sesion del header. Server Component async: resuelve
+ * `GET /auth/me` server-side (via `getCurrentUser`, cacheado por request) y
+ * decide entre "Ingresar" o los links de cuenta ya logueada. */
+export async function HeaderAuth() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return (
+      <Link href="/ingresar" className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>
+        Ingresar
+      </Link>
+    );
+  }
+
+  const label = user.display_name ?? user.email.split("@")[0];
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", whiteSpace: "nowrap" }}>
+      <Link href="/guardados" style={{ fontSize: 14 }}>
+        Favoritos
+      </Link>
+      <Link href="/mi-perfil" style={{ fontSize: 14 }}>
+        {label}
+      </Link>
+    </div>
+  );
+}
