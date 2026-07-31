@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/session";
+import { UserMenu } from "./UserMenu";
 
 /** Bloque de sesion del header. Server Component async: resuelve
  * `GET /auth/me` server-side (via `getCurrentUser`, cacheado por request) y
- * decide entre "Ingresar" o los links de cuenta ya logueada. */
+ * decide entre "Ingresar" o el dropdown de cuenta logueada. */
 export async function HeaderAuth() {
   const user = await getCurrentUser();
 
@@ -16,15 +17,5 @@ export async function HeaderAuth() {
   }
 
   const label = user.display_name ?? user.email.split("@")[0];
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", whiteSpace: "nowrap" }}>
-      <Link href="/guardados" style={{ fontSize: 14 }}>
-        Favoritos
-      </Link>
-      <Link href="/mi-perfil" style={{ fontSize: 14 }}>
-        {label}
-      </Link>
-    </div>
-  );
+  return <UserMenu label={label} />;
 }

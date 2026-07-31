@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { API_URL } from "@/lib/config";
@@ -33,6 +34,24 @@ interface ProductPageProps {
     official?: string;
     warranty?: string;
   }>;
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const result = await fetchJson<ProductDetail>(`${API_URL}/products/${id}`);
+  if (!result.ok) return { title: "Producto no encontrado" };
+  const p = result.data;
+  const prices = p.listings.map((l) => toNumber(l.final_price)).filter(Boolean);
+  const minPrice = prices.length ? Math.min(...prices) : null;
+  const title = p.canonical_title;
+  const description = minPrice
+    ? `Comparar precios de ${title} en ${p.listings.length} publicaciones. Desde $${Math.floor(minPrice).toLocaleString("es-AR")} con envío, cuotas y garantía.`
+    : `Comparar precios de ${title} en múltiples tiendas de Argentina.`;
+  return {
+    title,
+    description,
+    openGraph: { title: `${title} — comparar precios`, description },
+  };
 }
 
 const SORT_VALUES: SortKey[] = ["score", "price", "rating", "warranty", "seller"];
@@ -210,12 +229,12 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
             flexWrap: "wrap",
           }}
         >
-          <h4 style={{ margin: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>
             Todas las publicaciones{" "}
-            <span className="text-muted" style={{ fontSize: 14, fontWeight: 400 }}>
+            <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>
               {listings.length} tras los filtros
             </span>
-          </h4>
+          </h2>
           <ProductFilters
             productId={product.id}
             sort={sort}

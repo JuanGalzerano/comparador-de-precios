@@ -1,11 +1,32 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { HeaderAuth } from "@/components/HeaderAuth";
+import { SearchInput } from "@/components/SearchInput";
 import "../styles/nocturne.css";
 
 export const metadata: Metadata = {
-  title: "Cotejo — Comparador de precios",
-  description: "Buscá un producto y comparalo en todas sus publicaciones.",
+  metadataBase: new URL("https://cotejo.ar"),
+  title: {
+    default: "Cotejo — Comparador de precios Argentina",
+    template: "%s | Cotejo",
+  },
+  description:
+    "Compará precios de celulares, electrónica y tecnología en MercadoLibre, Frávega, Cetrogar, Naldo y más. Precio final con envío, cuotas y garantía en Argentina.",
+  openGraph: {
+    siteName: "Cotejo",
+    locale: "es_AR",
+    type: "website",
+    title: "Cotejo — Comparador de precios Argentina",
+    description:
+      "Compará precios de celulares, electrónica y tecnología en MercadoLibre, Frávega, Cetrogar, Naldo y más. Precio final con envío, cuotas y garantía en Argentina.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Cotejo — Comparador de precios Argentina",
+    description:
+      "Compará precios en MercadoLibre, Frávega, Cetrogar y más. Precio con envío, cuotas y garantía.",
+  },
+  robots: { index: true, follow: true },
 };
 
 /**
@@ -24,15 +45,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               position: "sticky",
               top: 0,
               zIndex: 20,
-              background: "var(--color-bg)",
-              boxShadow: "0 1px 0 var(--color-divider)",
+              background: "color-mix(in srgb, var(--color-bg) 90%, transparent)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              borderBottom: "1px solid var(--color-divider)",
             }}
           >
             <div
               style={{
                 maxWidth: 1240,
                 margin: "0 auto",
-                padding: "var(--space-4) var(--space-8)",
+                padding: "12px var(--space-8)",
                 display: "flex",
                 alignItems: "center",
                 gap: "var(--space-8)",
@@ -40,23 +63,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             >
               <Link
                 href="/"
-                style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", textDecoration: "none", color: "inherit" }}
+                style={{ display: "flex", alignItems: "center", gap: 7, textDecoration: "none", color: "inherit", flexShrink: 0 }}
               >
-                <span style={{ fontSize: 20, color: "var(--color-accent)" }}>⚖</span>
-                <span style={{ fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em" }}>Cotejo</span>
+                <span style={{ fontSize: 18, color: "var(--color-accent)", lineHeight: 1 }}>⚖</span>
+                <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.02em" }}>Cotejo</span>
               </Link>
 
-              <form action="/" method="get" style={{ flex: 1, maxWidth: 560 }}>
-                <input
-                  className="input"
-                  type="search"
-                  name="q"
-                  placeholder="Buscar un producto"
-                  aria-label="Buscar un producto"
-                />
+              <form action="/" method="get" style={{ flex: 1, maxWidth: 520 }}>
+                <SearchInput placeholder="Buscar producto o pegar link de MercadoLibre" />
               </form>
 
-              <HeaderAuth />
+              <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+                <HeaderAuth />
+              </div>
             </div>
           </header>
 

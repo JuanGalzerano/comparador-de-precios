@@ -200,6 +200,11 @@ class MercadoLibreAdapter(BaseSourceAdapter):
         headers = dict(self.config.headers)
         if self.config.user_agent:
             headers.setdefault("User-Agent", self.config.user_agent)
+        # OAuth 2.0 Client Credentials. Ver MERCADOLIBRE_API.md.
+        # Ponés ML_ACCESS_TOKEN en .env y el adapter lo inyecta automáticamente.
+        from app.config import settings
+        if token := settings.ml_access_token:
+            headers["Authorization"] = f"Bearer {token}"
         kwargs: dict[str, Any] = dict(
             base_url=self._base_url(),
             timeout=self.config.timeout_seconds,

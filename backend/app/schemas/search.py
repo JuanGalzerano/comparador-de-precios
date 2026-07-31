@@ -35,6 +35,8 @@ class ProductClusterOut(BaseModel):
     max_final_price: Decimal
     #: Mejor `score_of()` del set filtrado (0-100).
     best_score: int
+    #: URL externa directa (solo para resultados live de ML; None para items de la DB).
+    permalink: str | None = None
 
 
 class SearchResponse(BaseModel):

@@ -29,6 +29,8 @@ export interface ProductCluster {
   min_final_price: string;
   max_final_price: string;
   best_score: number;
+  /** URL externa directa (resultados live de ML). Null para items de la DB. */
+  permalink?: string | null;
 }
 
 /** Sobre paginado de `GET /search`. */

@@ -17,7 +17,9 @@ from app.adapters.errors import (
     SourceUnavailable,
     UnsupportedFetchMode,
 )
+from app.adapters.fravega import FravegaAdapter
 from app.adapters.mercadolibre import MercadoLibreAdapter
+from app.adapters.vtex import VtexAdapter
 from app.adapters.registry import (
     AdapterNotFound,
     build_adapter,
@@ -52,7 +54,9 @@ __all__ = [
     "FetchRequest",
     "HealthState",
     "HealthStatus",
+    "FravegaAdapter",
     "MercadoLibreAdapter",
+    "VtexAdapter",
     "NormalizationError",
     "NormalizedListingInput",
     "ProductHint",

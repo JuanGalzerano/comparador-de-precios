@@ -3,11 +3,11 @@
 Documento vivo. Se actualiza en cada iteración (implementación, revisión, o ronda de mejoras)
 — no es una foto única, es el registro acumulado del proyecto.
 
-Última actualización: 2026-07-30 (iteración 2).
+Última actualización: 2026-07-31 (iteración 3).
 
 ---
 
-## Funcionalidad actual (lo que YA funciona, verificado con tests)
+## Funcionalidad actual (lo que YA funciona, verificado con tests y preview local)
 
 - **Modelo de datos** (Postgres/SQLAlchemy): `retailer_source`, `product`, `listing`,
   `price_history`, `product_match`, `user_event`. Migración Alembic inicial aplicada.
@@ -26,6 +26,19 @@ Documento vivo. Se actualiza en cada iteración (implementación, revisión, o r
   ruido). Errores por item no rompen el resto del batch; errores de fuente completa sí se
   propagan y marcan `retailer_source.last_error`. CLI: `python -m app.workers.ingest <slug>`.
 - **51 tests pasando** en total (corridos contra SQLite en memoria — ver limitación abajo).
+- **Frontend Next.js real** (`frontend/`): páginas `/` (home + búsqueda), `/ingresar`
+  (login/registro toggle), `/mi-perfil` (guard de sesión server-side), `/guardados`
+  (favoritos paginados). Header real con buscador y bloque de sesión (`HeaderAuth`).
+- **Secciones home** ("Productos relevantes" + "Mejores oportunidades") alimentadas por
+  `GET /search` sin filtro — heurística de spread mientras no haya historial de 90 días.
+- **Detección de URL de MercadoLibre en el buscador**: al pegar una URL de ML, `SearchInput`
+  extrae los términos del slug de la URL (Client Component), y el Server Component muestra
+  un banner "Buscamos el mejor precio para X en todas las fuentes" + link "Ver en ML →".
+  Soporta fichas de catálogo (`/slug/p/MLAXXX`), publicaciones directas (`/MLAXXX-slug`),
+  y URLs cortas (`/p/MLAXXX`).
+- **Backend corriendo sobre SQLite local** (`dev.db`, 2 productos / 5 listings de ejemplo)
+  para desarrollo sin Postgres. Verificado: `GET /health`, `GET /search?q=iphone` devuelven
+  datos reales.
 
 ## Errores conocidos / supuestos sin verificar
 
@@ -52,11 +65,8 @@ contra la realidad antes de confiar en ellas a ciegas:
 
 ## Mejoras pendientes (por fase, ver plan completo)
 
-- **🔴 Prioridad actual (pedido explícito del usuario): frontend real en Next.js.** Hoy
-  `project/` es un prototipo estático (HTML/JS interpretado en el navegador, sin build, sin
-  conexión a datos reales) — pasar a Next.js da maniobrabilidad real para seguir
-  implementando features de UI. Arranca por el scaffold + la vista de búsqueda conectada a
-  `GET /search` (backend ya listo para consumir).
+- **Frontend real en Next.js**: ✅ implementado (iteración 3). Páginas, header, home,
+  detección de URL de ML — todo funcionando en `http://localhost:3000` contra el backend.
 - Historial de precios con gráfico en el frontend + alertas de baja de precio.
 - Programar el worker de ingesta (Celery/cron) para que corra solo — hoy `app/workers/ingest.py`
   existe y funciona pero hay que ejecutarlo a mano o vía CLI.
@@ -104,3 +114,8 @@ que el sitio esté online y lo use gente real.
   sin trackear en git (no se commiteó, a la espera de que el usuario lo pida). El usuario
   reprioriza manualmente: siguiente iteración va directo a frontend Next.js en vez del
   próximo ítem que hubiera elegido el revisor.
+- **2026-07-31 (3)**: frontend Next.js completo verificado en preview local. Páginas
+  login/registro/perfil/favoritos + header real + secciones home implementadas. Feature:
+  detección de URL de MercadoLibre en el buscador (`lib/ml-url.ts`, `SearchInput.tsx`,
+  banner en `page.tsx`). Backend corriendo sobre SQLite local con `.env` de desarrollo.
+  Creados `INFRAESTRUCTURA.md` (guía de integración Vercel/Railway/Neon/Redis/AdSense).

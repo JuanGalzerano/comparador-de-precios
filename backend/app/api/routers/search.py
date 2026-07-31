@@ -26,10 +26,12 @@ que el mock especifique.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from decimal import Decimal
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Query
 from sqlalchemy import ColumnElement, func, or_, select
 
@@ -40,7 +42,62 @@ from app.models.product import Product
 from app.scoring.score import score_listings
 from app.schemas.search import ProductClusterOut, SearchResponse
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
+
+_ML_SEARCH_URL = "https://api.mercadolibre.com/sites/MLA/search"
+_ML_TIMEOUT = 5.0
+
+
+def _ml_score(item: dict) -> int:
+    score = 42
+    level = (item.get("seller") or {}).get("power_seller_status")
+    if level == "platinum":
+        score += 22
+    elif level == "gold":
+        score += 15
+    elif level == "silver":
+        score += 8
+    if (item.get("shipping") or {}).get("free_shipping"):
+        score += 8
+    inst = item.get("installments") or {}
+    if inst.get("rate") == 0 and (inst.get("quantity") or 1) > 1:
+        score += 8
+    return min(100, score)
+
+
+def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
+    try:
+        with httpx.Client(timeout=_ML_TIMEOUT) as client:
+            resp = client.get(
+                _ML_SEARCH_URL,
+                params={"q": query, "limit": min(limit, 50), "sort": "relevance"},
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("ML live search failed for %r: %s", query, exc)
+        return []
+
+    results: list[ProductClusterOut] = []
+    for i, item in enumerate(resp.json().get("results", [])[:limit]):
+        price = Decimal(str(item.get("price") or 0))
+        attrs = {a["id"]: a.get("value_name") for a in (item.get("attributes") or [])}
+        results.append(
+            ProductClusterOut(
+                id=-(i + 1),
+                canonical_title=item.get("title", ""),
+                brand=attrs.get("BRAND"),
+                model=attrs.get("MODEL"),
+                category=None,
+                catalog_product_id=item.get("catalog_product_id"),
+                listing_count=1,
+                min_final_price=price,
+                max_final_price=price,
+                best_score=_ml_score(item),
+                permalink=item.get("permalink"),
+            )
+        )
+    return results
 
 
 def _build_filters(
@@ -116,7 +173,8 @@ def search(
     agg_rows = db.execute(page_stmt).all()
 
     if not agg_rows:
-        return SearchResponse(items=[], page=page, page_size=page_size, total=total)
+        ml_items = _ml_live_search(q.strip(), page_size) if q and q.strip() else []
+        return SearchResponse(items=ml_items, page=page, page_size=page_size, total=len(ml_items))
 
     product_ids = [row.product_id for row in agg_rows]
     products_by_id = {
@@ -154,5 +212,11 @@ def search(
                 best_score=best_score,
             )
         )
+
+    # Complementar con ML live si la DB no llena la página
+    if q and q.strip() and len(items) < page_size:
+        ml_items = _ml_live_search(q.strip(), page_size - len(items))
+        items.extend(ml_items)
+        total += len(ml_items)
 
     return SearchResponse(items=items, page=page, page_size=page_size, total=total)

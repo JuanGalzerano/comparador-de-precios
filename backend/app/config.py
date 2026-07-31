@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     session_cookie_secure: bool | None = None
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
+    # --- MercadoLibre OAuth ------------------------------------------------
+    # Client Credentials flow. Ver MERCADOLIBRE_API.md para obtener el token.
+    # Sin token: el MercadoLibreAdapter devuelve 403 en todos los endpoints.
+    ml_access_token: str | None = None
+
     @property
     def is_local(self) -> bool:
         return self.cotejo_env.lower() in {"local", "dev", "development", "test"}
