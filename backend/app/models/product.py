@@ -8,12 +8,20 @@ por matching propio (marca + modelo + atributos) y `catalog_product_id` queda NU
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Index, String
+from sqlalchemy import Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, IdMixin, JsonDict, JSONBType, TimestampMixin
+from app.models.base import (
+    Base,
+    IdMixin,
+    JsonDict,
+    JSONBType,
+    TimestampMixin,
+    TZDateTime,
+)
 
 if TYPE_CHECKING:
     from app.models.listing import Listing
@@ -39,6 +47,17 @@ class Product(IdMixin, TimestampMixin, Base):
         JSONBType, nullable=False, default=dict, server_default="{}"
     )
 
+    # --- Uso: alimenta la politica de evicción del cache ---------------------
+    # La base es un cache de lo que la gente busca (ver `app/services/live_search.py`),
+    # asi que necesita saber que se usa y que no. Estas dos columnas son las entradas de
+    # `app/services/maintenance.py`: se borra lo viejo Y poco visto, nunca solo por edad.
+    #: Ultima vez que este producto aparecio en resultados o se abrio su ficha.
+    last_accessed_at: Mapped[datetime | None] = mapped_column(TZDateTime)
+    #: Cuantas veces paso eso. Un producto muy buscado sobrevive aunque tenga unos dias.
+    access_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     listings: Mapped[list["Listing"]] = relationship(back_populates="product")
     matches: Mapped[list["ProductMatch"]] = relationship(
         back_populates="product",
@@ -49,6 +68,9 @@ class Product(IdMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_product_brand_model", "brand", "model"),
         Index("ix_product_category", "category"),
+        # La evicción busca "lo menos usado y mas viejo": este indice es el que hace que
+        # esa consulta no recorra toda la tabla.
+        Index("ix_product_access_count_last_accessed", "access_count", "last_accessed_at"),
         # TODO(matching v2): indice GIN trigram sobre `canonical_title` para el matching
         # fuzzy (`CREATE EXTENSION pg_trgm` + `gin_trgm_ops`). No se incluye en la
         # migracion inicial porque crear la extension requiere privilegios de superusuario

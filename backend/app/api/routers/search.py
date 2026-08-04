@@ -44,6 +44,7 @@ from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
 from app.schemas.search import ProductClusterOut, SearchResponse
 from app.services.live_search import fetch_live, should_fetch
+from app.services.maintenance import touch_products
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
@@ -181,13 +182,51 @@ def _build_filters(
 _LIVE_ENOUGH_RESULTS = 5
 
 
+def _live_items_to_clusters(items: list) -> list[ProductClusterOut]:
+    """Convierte publicaciones sin guardar en clusters de respuesta.
+
+    Solo se usa en el modo degradado (base llena): se agrupa por título normalizado, que
+    es una aproximación al matcher — no hay `product` en la base contra el cual agrupar.
+    """
+    from app.matching.normalize import normalize_text
+
+    by_key: dict[str, list] = defaultdict(list)
+    for item in items:
+        by_key[normalize_text(item.title)].append(item)
+
+    clusters: list[ProductClusterOut] = []
+    for i, (_, group) in enumerate(by_key.items()):
+        prices = [it.price + (it.shipping_cost or Decimal(0)) for it in group]
+        first = group[0]
+        clusters.append(
+            ProductClusterOut(
+                id=-(i + 1),  # efímero: no existe en la base
+                canonical_title=first.title,
+                brand=first.product_hint.brand if first.product_hint else None,
+                model=None,
+                category=None,
+                catalog_product_id=None,
+                listing_count=len(group),
+                retailer_count=len({it.source_slug for it in group}),
+                retailer_names=sorted({it.source_slug for it in group}),
+                min_final_price=min(prices),
+                max_final_price=max(prices),
+                best_score=50,
+                permalink=first.permalink,
+            )
+        )
+    clusters.sort(key=lambda c: c.min_final_price)
+    return clusters
+
+
 def _maybe_fetch_live(
     db: DbSession,
     term: str,
     *,
     category: str | None,
     condition: str,
-) -> None:
+) -> list[ProductClusterOut]:
+    """Devuelve clusters efímeros si la base está llena; lista vacía en el caso normal."""
     """Consulta las tiendas en vivo si la base no tiene suficiente para este término.
 
     Se hace ANTES de la query principal para que los resultados nuevos entren en la
@@ -202,17 +241,22 @@ def _maybe_fetch_live(
     ).scalar_one()
 
     if existing >= _LIVE_ENOUGH_RESULTS:
-        return
+        return []
     if not should_fetch(term):
-        return
+        return []
 
     try:
-        fetch_live(db, term)
+        result = fetch_live(db, term)
     except Exception as exc:
         # Una búsqueda en vivo fallida nunca puede romper la búsqueda: se sigue con lo
         # que haya en la base.
         db.rollback()
         logger.warning("live search failed for %r: %s", term, exc)
+        return []
+
+    if not result.persisted and result.items:
+        return _live_items_to_clusters(result.items)
+    return []
 
 
 @router.get("", response_model=SearchResponse)
@@ -245,8 +289,16 @@ def search(
     # normal — la próxima búsqueda del mismo término ya sale de la base.
     # Solo en la primera página y solo con término de búsqueda: paginar o navegar el
     # catálogo no puede disparar tráfico a las tiendas.
+    ephemeral: list[ProductClusterOut] = []
     if live and q and q.strip() and page == 1:
-        _maybe_fetch_live(db, q.strip(), category=category, condition=condition)
+        ephemeral = _maybe_fetch_live(db, q.strip(), category=category, condition=condition)
+
+    if ephemeral:
+        # Modo degradado (base en la cuota): no hay nada que consultar en la base para
+        # este término porque no se guardó. Se responde con lo que trajeron las tiendas.
+        return SearchResponse(
+            items=ephemeral[:page_size], page=page, page_size=page_size, total=len(ephemeral)
+        )
 
     filters = _build_filters(q=q, category=category, condition=condition)
 
@@ -339,6 +391,10 @@ def search(
                 best_score=best_score,
             )
         )
+
+    # Registrar que estos productos se usaron: es lo que le permite a la evicción
+    # distinguir un producto que se busca seguido de uno que nadie miró nunca.
+    touch_products(db, [item.id for item in items if item.id > 0])
 
     # Complementar con ML live si la DB no llena la página (solo la primera: ver arriba)
     if q and q.strip() and page == 1 and len(items) < page_size:

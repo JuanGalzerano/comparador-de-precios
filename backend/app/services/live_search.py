@@ -38,6 +38,7 @@ from app.adapters.types import FetchMode, NormalizedListingInput, SearchQuery
 from app.enums import SourceStatus
 from app.matching.matcher import match_listings
 from app.models.retailer_source import RetailerSource
+from app.services.maintenance import should_persist
 from app.workers.ingest import IngestRunResult, _upsert_listing
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,11 @@ class LiveSearchResult:
     sources_failed: list[str] = field(default_factory=list)
     elapsed_ms: int = 0
     skipped_by_cooldown: bool = False
+    #: La base está cerca de la cuota: se consultó igual, pero no se guardó nada.
+    persisted: bool = True
+    #: Lo que trajeron las tiendas. Solo se completa cuando `persisted` es `False`: ahí
+    #: `/search` no puede leerlo de la base y tiene que servirlo desde acá.
+    items: list[NormalizedListingInput] = field(default_factory=list)
 
     @property
     def found_anything(self) -> bool:
@@ -199,6 +205,16 @@ def fetch_live(
         return result
 
     # --- Fase 2: escritura, en el hilo principal --------------------------------
+    # Freno por cuota: si la base está llena, se devuelve lo que trajeron las tiendas
+    # sin guardarlo. El sitio sigue funcionando (más lento, porque cada búsqueda vuelve
+    # a salir a la red), en vez de dejar de encontrar cosas.
+    if not should_persist(db):
+        result.persisted = False
+        result.items = [item for _, items in fetched for item in items]
+        result.elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.warning("%s (sin guardar: base cerca de la cuota)", result)
+        return result
+
     sources_by_id = {s.id: s for s in sources}
     run = IngestRunResult(source_slug="live")
     for source_id, items in fetched:

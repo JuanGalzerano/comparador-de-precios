@@ -82,7 +82,23 @@ Orden exacto, ya verificado contra el código:
    connection string.
 2. **Backend** en [railway.app](https://railway.app): root `backend/`, start command
    `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-   Variables: `DATABASE_URL`, `COTEJO_ENV=production`, `CORS_ORIGINS`, `ML_ACCESS_TOKEN`.
+   Variables: `DATABASE_URL`, `COTEJO_ENV=production`, `CORS_ORIGINS`, `ML_ACCESS_TOKEN`
+   y **`STORAGE_QUOTA_MB`**.
+
+   > **Sobre `STORAGE_QUOTA_MB`:** es la cuota de tu plan de base, y de ahí salen los
+   > umbrales del caché (75% borra lo frío, 90% deja de guardar). El default del código
+   > es **512, que es justo el free tier de Neon**, así que **si vas con Neon gratis no
+   > tenés que tocar nada**. Cambialo solo si contratás otra cosa:
+   >
+   > | Plan | Valor |
+   > |---|---|
+   > | Neon free | 512 (default, no hace falta setearlo) |
+   > | Supabase free | 500 |
+   > | Neon Launch | 10240 |
+   > | Railway Postgres | lo que tenga asignado el volumen |
+   >
+   > Si lo dejás más alto que la cuota real, el freno actúa tarde y la base se llena de
+   > verdad. Más bajo no rompe nada: solo empieza a reciclar antes.
 3. **Correr las migraciones y sembrar las tiendas** — este paso faltaba por completo en
    las versiones anteriores de la documentación, y sin él el backend arranca contra una
    base vacía donde toda ingesta falla:
@@ -145,11 +161,44 @@ Esa tabla crece para siempre:
 50.000 publicaciones × 1 punto por día × 365 días = 18.000.000 filas ≈ 1,8 GB
 ```
 
-Ahí sí revienta cualquier plan gratis. Se resuelve con dos reglas:
+Ahí sí revienta cualquier plan gratis. **Resuelto el 2026-08-04** con la política de
+reemplazo de abajo.
 
-1. **Guardar un punto solo cuando el precio cambia.** ✅ Ya implementado.
-2. **Borrar lo más viejo de 90 días.** ❌ Falta (ver §4-C). Con esto el historial se
-   estabiliza en decenas de MB y nunca crece más.
+### La base nunca se llena ni deja de funcionar
+
+`app/services/maintenance.py` — tres capas, el patrón estándar de cualquier caché:
+
+| Capa | Qué hace | Cuándo actúa |
+|---|---|---|
+| **1. Retención** | Borra el historial de precios de más de 90 días. Nunca deja una publicación sin ningún punto. | Siempre (es barato) |
+| **2. Evicción** | Borra los productos **fríos y poco buscados**, con sus publicaciones. | Al 75% de la cuota |
+| **3. Freno** | Deja de guardar: busca en vivo y sirve los resultados **desde memoria**. | Al 90% de la cuota |
+
+**El criterio de la capa 2 combina recencia y frecuencia**, que es lo que hace cualquier
+caché serio, porque cada señal sola se equivoca: por edad pura se borran los clásicos que
+se buscan siempre; por frecuencia pura nunca entra nada nuevo. Concretamente, un producto
+se borra solo si cumple **todo** esto:
+
+- Tiene más de 7 días (uno recién traído todavía no tuvo la oportunidad de que lo busquen).
+- Nadie lo vio en 30 días.
+- Se vio menos de 5 veces en total.
+- **Nadie lo tiene en favoritos** — eso no se toca nunca.
+
+Se borra lo peor primero: menos accesos y, a igualdad, más viejo. Y borrar no pierde
+nada: si mañana alguien lo busca, vuelve de las tiendas en ~2 segundos.
+
+**La capa 3 es la que garantiza que el sitio nunca deje de funcionar.** Verificado
+simulando la base al 95%: consulta las tres tiendas, devuelve 25 resultados y escribe
+cero. Se degrada a "buscador en tiempo real" — más lento, nunca roto.
+
+Para ver cuánto espacio queda:
+
+```bash
+python -m app.workers.maintenance --status
+```
+
+O el endpoint `GET /health/storage`, que además avisa si ya está evictando o en modo
+solo-lectura.
 
 ### Dos trampas de los planes gratis
 
@@ -271,9 +320,8 @@ Ver §3. El sitio ya responde cualquier búsqueda, no solo lo que estaba cargado
 ### B. 🥇 Alertas de bajada de precio
 Necesita que vos elijas el canal (email / push / panel).
 
-### C. 🥉 Retención de 90 días en el historial
-Es lo que evita que la base crezca sin límite. Media hora de trabajo, y hay que hacerlo
-**antes** de que la ingesta corra sola.
+### C. ✅ Política de reemplazo del caché — HECHO (2026-08-04)
+Tres capas, ver §2. La base ya no puede crecer sin límite ni dejar de funcionar.
 
 ### D. Categorías / navegación por rubro
 Los productos que crea el matcher no tienen categoría, así que no hay forma de navegar
@@ -321,8 +369,9 @@ publicaciones; a partir de ~300.000 hay que cachearlo. **Ya tiene el índice que
 `ILIKE '%texto%'` obliga a recorrer la tabla completa. La solución (índice GIN con
 `pg_trgm`) solo aplica a Postgres, así que recién se puede hacer después de desplegar.
 
-### 5. El historial no tiene límite de tamaño
-Ver §4-C. **Es lo único de esta lista que hay que resolver antes de automatizar la ingesta.**
+### 5. La evicción no corre sola todavía
+La política existe y funciona, pero hay que dispararla (`python -m app.workers.maintenance`).
+Cuando armemos la ingesta automática (§1-B) va en el mismo cron, una vez por día.
 
 ---
 
@@ -339,7 +388,7 @@ Para no volver a pedirlo:
 - ✅ **Pegar el link de cualquier tienda** en el buscador.
 - ✅ **SEO**: sitemap, robots, metadatos. Falta solo la imagen de Open Graph.
 - ✅ **Responsive**, verificado a 390 px y 1600×600.
-- ✅ **130 tests**.
+- ✅ **146 tests**.
 - ✅ **Seed de tiendas para producción** (`scripts/seed_sources.py`).
 - ✅ **Sin secretos en el repo** — auditado sobre todo el historial de git.
 

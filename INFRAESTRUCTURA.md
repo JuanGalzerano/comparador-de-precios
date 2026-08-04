@@ -90,6 +90,7 @@ Los dos comandos son idempotentes: correrlos de nuevo no duplica ni borra nada.
 | `CORS_ORIGINS` | Tiene que incluir la URL real del frontend (la de `*.vercel.app` también). Si no, el gráfico de historial de precios desaparece sin error visible. |
 | `COTEJO_ENV` | Distinto de `local` activa la cookie `Secure`. En HTTPS es obligatorio. |
 | `ML_ACCESS_TOKEN` | Sin esto MercadoLibre responde 403 y esa fuente queda vacía. |
+| `STORAGE_QUOTA_MB` | La cuota de TU plan de base. Default 512 (Neon free). Si la dejás más alta que la real, el freno del caché actúa tarde y la base se llena de verdad. |
 
 **Alternativa:** Render.com — misma idea, distinta UI. Railway tiene mejor DX.
 

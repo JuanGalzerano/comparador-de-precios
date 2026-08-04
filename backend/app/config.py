@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 10
 
+    #: Cuota de almacenamiento del plan contratado, en MB. La base es un cache de lo que
+    #: la gente busca, asi que necesita saber cuando parar: a partir del 75% se borra lo
+    #: frio y a partir del 90% se deja de guardar (`app/services/maintenance.py`).
+    #: Default 512 MB = free tier de Neon. Supabase free = 500.
+    storage_quota_mb: int = 512
+
     # --- Cola de ingesta ---------------------------------------------------
     # Reservado para Celery. La configuracion del worker es una tarea aparte;
     # esto queda declarado para que no haya que tocar config despues.
@@ -88,6 +94,10 @@ class Settings(BaseSettings):
     @property
     def uses_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def storage_quota_bytes(self) -> int:
+        return self.storage_quota_mb * 1024 * 1024
 
     @property
     def is_local(self) -> bool:
