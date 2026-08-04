@@ -32,8 +32,13 @@ Usuario
 3. Framework preset: Next.js (auto-detectado).
 4. Variables de entorno en el dashboard de Vercel:
    ```
-   NEXT_PUBLIC_API_URL=https://api.cotejo.ar   # URL del backend en Railway/Render
+   NEXT_PUBLIC_API_URL=https://api.cotejo.ar    # URL del backend en Railway/Render
+   NEXT_PUBLIC_SITE_URL=https://cotejo.ar        # URL publica del sitio (sitemap, robots, Open Graph)
    ```
+   > **Ojo:** las variables `NEXT_PUBLIC_*` se congelan durante el build. Si las agregas
+   > despues del primer deploy, hay que forzar un rebuild — si no, el sitio va a seguir
+   > buscando el backend en `http://localhost:8000` y va a mostrar el cartel de "no
+   > pudimos conectar" en todas las paginas.
 5. Cada push a `main` dispara un deploy. PRs generan preview URLs.
 
 **Dominio:** en Settings → Domains → agregar `cotejo.ar` (o `itsfree.dev`).
@@ -61,6 +66,31 @@ Usuario
    automáticamente y pone `DATABASE_URL` como variable interna).
 6. Para Redis: agregar plugin Redis de Railway o usar Upstash (ver §5).
 
+### ⚠️ Paso que falta en casi todas las guías: migrar y sembrar
+
+Las migraciones **crean las tablas pero no insertan ninguna fila**. Sin sembrar
+`retailer_source`, el backend arranca bien pero `/sources` devuelve vacío y **toda
+ingesta falla** con `SourceNotConfigured`. Configurar como pre-deploy / release command:
+
+```bash
+alembic upgrade head && python -m scripts.seed_sources
+```
+
+Los dos comandos son idempotentes: correrlos de nuevo no duplica ni borra nada.
+
+> Si usás el plugin Postgres de Railway, esto **tiene** que correr dentro de Railway: su
+> `DATABASE_URL` es una red interna, no alcanzable desde tu máquina. Con Neon (URL
+> pública) podés correrlo desde tu PC.
+
+### Variables que importan y por qué
+
+| Variable | Qué pasa si está mal |
+| --- | --- |
+| `DATABASE_URL` | Si falta, la app arranca contra SQLite y **los datos se pierden en cada reinicio**. Avisa por log al arrancar. |
+| `CORS_ORIGINS` | Tiene que incluir la URL real del frontend (la de `*.vercel.app` también). Si no, el gráfico de historial de precios desaparece sin error visible. |
+| `COTEJO_ENV` | Distinto de `local` activa la cookie `Secure`. En HTTPS es obligatorio. |
+| `ML_ACCESS_TOKEN` | Sin esto MercadoLibre responde 403 y esa fuente queda vacía. |
+
 **Alternativa:** Render.com — misma idea, distinta UI. Railway tiene mejor DX.
 
 ---
@@ -75,10 +105,10 @@ Usuario
    ```
    postgresql+psycopg2://user:pw@ep-xxx.us-east-2.aws.neon.tech/cotejo?sslmode=require
    ```
-3. En `backend/app/db.py`, agregar `connect_args={"sslmode": "require"}` si se usa Neon:
-   ```python
-   engine = create_engine(settings.database_url, connect_args={"sslmode": "require"}, ...)
-   ```
+3. **No hace falta tocar `app/db.py`.** psycopg2 lee `?sslmode=require` directamente del
+   query string de la URL, que la connection string de Neon ya trae. (Versiones
+   anteriores de esta guía pedían agregar `connect_args={"sslmode": "require"}`: además
+   de innecesario, rompe si algún día se migra a psycopg3.)
 4. Neon soporta branching: crear un branch `dev` para tests de CI sin tocar producción.
 
 **Free tier:** 0.5 GB storage, 1 proyecto, branch ilimitados.
@@ -112,7 +142,7 @@ de forma programada sin bloquear la API. Celery usa Redis como broker.
    celery = Celery("cotejo", broker=settings.redis_url, backend=settings.redis_url)
    celery.conf.beat_schedule = {
        "ingest-ml-every-hour": {
-           "task": "app.workers.ingest.run",
+           "task": "app.workers.ingest.ingest_source",  # el simbolo real; `run` no existe
            "schedule": 3600,
            "args": ["mercadolibre"],
        }
@@ -129,7 +159,7 @@ de forma programada sin bloquear la API. Celery usa Redis como broker.
 
 ## 6. GitHub Actions — CI
 
-**Para qué:** correr los 51 tests automáticamente en cada PR antes de mergear.
+**Para qué:** correr los 123 tests automáticamente en cada PR antes de mergear.
 
 **Integración:** crear `.github/workflows/ci.yml`:
 ```yaml
@@ -142,7 +172,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install -e "backend/[dev]"
+      - run: pip install -e "./backend[dev]"
       - run: pytest backend/tests/
         env:
           DATABASE_URL: sqlite+pysqlite:///./test.db

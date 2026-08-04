@@ -1,224 +1,336 @@
 # Pendiente — todo lo que falta hacer en Cotejo
 
-Actualizado 2026-08-04. Orden: de lo más bloqueante a lo más futuro.
-Distingue entre lo que tenés que hacer **vos** y lo que puede hacer Claude.
+Actualizado: 2026-08-04, después de dos auditorías completas del código (estructura del
+backend, y si los pasos manuales de estos `.md` realmente funcionan).
 
-## Lo que ya NO está pendiente (se hizo el 2026-08-04)
-
-- ~~Cetrogar y Naldo no están en la base~~ → cargados, con datos reales.
-- ~~Gráfico de historial de precios~~ → hecho.
-- ~~Matching entre tiendas~~ → hecho (`app/matching/`), 32 productos comparados entre
-  2 y 3 tiendas.
-- ~~Página de transparencia~~ → `/como-funciona`, con datos en vivo.
-- ~~SEO / sitemap~~ → hecho (falta Open Graph con imagen).
-- ~~Responsive mobile~~ → verificado a 390px.
-
-**El único bloqueo real que queda es el token de MercadoLibre.** Todo lo demás ya
-funciona con Frávega, Cetrogar y Naldo.
+**Estado en una línea:** el comparador funciona de verdad en local, con datos reales de
+tres tiendas y 50 productos comparables entre ellas. Lo que falta es ponerlo online.
 
 ---
 
-## 🔴 BLOQUEO 1 — MercadoLibre OAuth (te bloquea tener datos reales de ML)
+## Índice
 
-Necesitás una cuenta en el portal de devs de ML y un token. Sin esto, el `MercadoLibreAdapter` existe y tiene tests pero **no puede hacer ninguna llamada real**.
+1. [Lo que tenés que hacer vos](#1-lo-que-tenés-que-hacer-vos)
+2. [¿Alcanza una base de datos gratis?](#2-alcanza-una-base-de-datos-gratis)
+3. [Alternativas de diseño (no guardar el mundo)](#3-alternativas-de-diseño)
+4. [Lo que puede hacer Claude](#4-lo-que-puede-hacer-claude)
+5. [Deuda técnica conocida](#5-deuda-técnica-conocida)
+6. [Lo que ya está hecho](#6-lo-que-ya-está-hecho)
 
-### Pasos (los hacés vos)
+---
+
+## 1. Lo que tenés que hacer vos
+
+### 🔴 A. Token de MercadoLibre — 15 minutos
+
+Es el único bloqueo que no puede resolver el código. ML dejó de permitir acceso sin
+autenticación: hoy responde `403` a todo.
 
 1. Entrá a **https://developers.mercadolibre.com.ar** con tu cuenta de ML.
-2. **Crear aplicación** → nombre: `cotejo-dev`, dominio: `localhost`, redirect URI: `http://localhost:8000/auth/ml/callback`, scope: `read`.
-3. Copiá el `client_id` y `client_secret` que te da ML.
-4. En `backend/.env` agregá:
-   ```
-   ML_CLIENT_ID=<tu_client_id>
-   ML_CLIENT_SECRET=<tu_client_secret>
-   ```
-5. Corrés este curl para obtener el token:
+2. **Crear aplicación**: nombre `cotejo-dev`, dominio `localhost`, redirect URI
+   `http://localhost:8000/auth/ml/callback`, scope `read`.
+3. Copiá `client_id` y `client_secret`.
+4. Pedí el token:
    ```bash
-   curl -X POST https://api.mercadolibre.com/oauth/token \
-     -H "content-type: application/x-www-form-urlencoded" \
-     -d "grant_type=client_credentials&client_id=TU_CLIENT_ID&client_secret=TU_CLIENT_SECRET"
+   curl -X POST https://api.mercadolibre.com/oauth/token -H "content-type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=TU_CLIENT_ID&client_secret=TU_CLIENT_SECRET"
    ```
-6. Copiás el `access_token` de la respuesta y lo agregás a `backend/.env`:
+5. Pegá el `access_token` en `backend/.env`:
    ```
    ML_ACCESS_TOKEN=APP_USR-xxxxxx
    ```
-7. **Avisarme** → Claude modifica `app/config.py` y `app/adapters/mercadolibre.py` (son 3 líneas de código) para inyectar el token.
-8. Corrés la ingesta real: `python -m app.workers.ingest mercadolibre --term "iphone 13" --max-results 20`
+6. Reiniciá el backend. **Nada más.**
 
-> Guía completa: `MERCADOLIBRE_API.md` en la raíz del proyecto.
+> **Corrección importante:** las versiones anteriores de este archivo y de
+> `MERCADOLIBRE_API.md` decían que después de conseguir el token había que avisarle a
+> Claude para modificar `config.py` y el adapter. **Eso ya está hecho** — el adapter
+> inyecta el header `Authorization` desde `2026-07-31`, y desde hoy también lo hace la
+> búsqueda en vivo de `/search`. Con poner la variable y reiniciar alcanza.
 
----
+**El token dura 6 horas.** No hay auto-renovación todavía (ver §4-F). Cuando vence, la
+ingesta falla con 403. Ya no queda la fuente marcada como "bloqueada por ToS" para
+siempre: desde hoy, una corrida exitosa la reactiva sola.
 
-## ✅ Tiendas activas hoy (con datos reales en la base)
+### 🟡 B. Que los precios se actualicen solos — elegí un camino
 
-| Tienda | Cómo se obtiene | Publicaciones | Mejor precio en |
-|--------|-----------------|---------------|-----------------|
-| **Frávega** | API GraphQL propia (`/api/v2`) | 159 | 75% de los productos comparados |
-| **Cetrogar** | VTEX Intelligent Search | 141 | 45% |
-| **Naldo** | VTEX Intelligent Search | 126 | 30% |
+Hoy la ingesta la disparás a mano, así que **los precios son una foto del día que la
+corriste y el gráfico de historial casi no tiene puntos**. Sin esto, la promesa de
+"detectar ofertas que no bajaron nada" no se puede cumplir: no hay con qué comparar.
 
-Para traer más productos:
+**Qué es Redis / Upstash, por si no te suena:** Redis es una base de datos en memoria,
+muy rápida. Acá no guardaría productos (eso sigue en Postgres) sino que funcionaría como
+**cola de tareas**: la lista de "traer precios de Frávega a las 9, a las 13 y a las 17".
+Celery es el programa que lee esa cola y ejecuta. Upstash es un Redis alojado, con plan
+gratis de 10.000 comandos por día — muchísimo más de lo que esto necesita.
 
-```bash
-python -m app.workers.ingest cetrogar --term "smart tv 55" --max-results 24
-```
-
-La ingesta corre el matcher sola al terminar (`--no-match` para saltearlo).
-
----
-
-## 🟡 FEATURES PENDIENTES (Claude puede implementarlos cuando vos lo pidas)
-
-Estas cosas **no las hice todavía** porque esperaban que el MVP básico estuviera sólido. Decime cuál querés primero.
-
-### A. ✅ Gráfico de historial de precios — HECHO (2026-08-04)
-- SVG propio en `frontend/components/PriceHistoryChart.tsx`, sin librerías nuevas.
-- Muestra el precio más bajo por día de los últimos 90 días.
-- **Para que tenga datos de verdad necesita ingestas repetidas en el tiempo** (hoy hay
-  1-2 días de historial). Eso lo resuelve el punto C.
-
-### B. Alertas de bajada de precio
-- El usuario guardado pone un precio objetivo → el worker avisa cuando se alcanza.
-- Necesitás definir: ¿aviso por email? ¿por notificación push? ¿solo en el panel?
-- **Decisión tuya** sobre el canal; implementación la hace Claude.
-
-### C. Worker de ingesta automático — el pendiente más importante
-
-Hoy la ingesta corre a mano (`python -m app.workers.ingest`), así que **los precios son
-una foto del día que la corrí y el gráfico de historial casi no tiene puntos**. Sin esto,
-la promesa de "detectar ofertas que no bajaron nada" no se puede cumplir: no hay con qué
-comparar.
-
-**Qué es Upstash / Redis (por si no te suena):** Redis es una base de datos en memoria,
-muy rápida. Acá no se usa para guardar productos (eso sigue en Postgres) sino como **cola
-de tareas**: la lista de "traer precios de Frávega a las 9, a las 13 y a las 17". Celery
-es el programa que lee esa cola y ejecuta las tareas. Upstash es un Redis alojado en la
-nube, con plan gratis de 10.000 comandos por día — muchísimo más de lo que esto necesita.
-
-Dos caminos, elegí uno:
-
-| | Upstash + Celery | Programador de tareas de Windows |
+| | Programador de tareas de Windows | Upstash + Celery |
 |---|---|---|
 | Costo | Gratis | Gratis |
-| Sirve para producción | Sí | No — solo mientras tu PC esté prendida |
-| Qué tenés que hacer | Crear cuenta en upstash.com, crear una base Redis, copiar el `REDIS_URL` y pasármelo | Nada, lo configuro yo |
-| Cuánto tarda | 5 minutos tuyos | 0 |
+| Configuración tuya | Ninguna, lo hace Claude | Crear cuenta, copiar `REDIS_URL` (5 min) |
+| Sirve en producción | No: solo con tu PC prendida | Sí |
+| Cuándo | **Ahora**, para empezar a juntar historial | Cuando subas el sitio |
 
-**Mi recomendación:** empezá por el Programador de tareas de Windows para que el historial
-se empiece a llenar desde hoy, y pasá a Upstash cuando subas el sitio a internet. Decime
-"configurá la tarea programada" y lo hago.
+**Recomendación:** arrancá hoy con el Programador de Windows para que el historial se
+empiece a llenar, y pasá a Upstash cuando despliegues. Decime *"configurá la tarea
+programada"* y lo hago.
 
-### D. ✅ Matching entre tiendas — HECHO (2026-08-04)
-- `app/matching/` agrupa el mismo producto de distintas tiendas. 32 clusters
-  multi-tienda hoy.
-- Lo que falta: la vía de embeddings para categorías donde el título no trae código de
-  modelo (ropa, muebles, genéricos). Con electro/tecnología el matcher actual alcanza.
+### 🔵 C. Subir el sitio (cuando quieras lanzar)
+
+Orden exacto, ya verificado contra el código:
+
+1. **Base de datos** — crear proyecto en [neon.tech](https://neon.tech), copiar la
+   connection string.
+2. **Backend** en [railway.app](https://railway.app): root `backend/`, start command
+   `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+   Variables: `DATABASE_URL`, `COTEJO_ENV=production`, `CORS_ORIGINS`, `ML_ACCESS_TOKEN`.
+3. **Correr las migraciones y sembrar las tiendas** — este paso faltaba por completo en
+   las versiones anteriores de la documentación, y sin él el backend arranca contra una
+   base vacía donde toda ingesta falla:
+   ```bash
+   alembic upgrade head
+   python -m scripts.seed_sources
+   ```
+4. **Frontend** en [vercel.com](https://vercel.com): root `frontend/`, variables
+   `NEXT_PUBLIC_API_URL` (la URL de Railway) y `NEXT_PUBLIC_SITE_URL` (la de Vercel).
+5. **Dominio** (opcional al principio).
+
+**Tres trampas concretas, todas verificadas:**
+
+- **`CORS_ORIGINS` tiene que incluir la URL de Vercel**, no solo `cotejo.ar`. El gráfico
+  de historial de precios es lo único que llama al backend desde el navegador; con el
+  dominio mal configurado, ese gráfico desaparece en silencio y el resto anda. Formato:
+  `CORS_ORIGINS=["https://tu-app.vercel.app"]` o `https://a.com,https://b.com` (desde hoy
+  se aceptan las dos formas; antes la forma con comas hacía que la app **no arrancara**).
+- **`NEXT_PUBLIC_API_URL` se congela cuando Vercel hace el build.** Si la agregás después
+  del primer deploy sin forzar rebuild, todo el sitio va a decir "No pudimos conectar con
+  el backend en http://localhost:8000".
+- **El backend no tiene `Procfile` ni `Dockerfile`**, solo `pyproject.toml`. Railway lo va
+  a detectar solo, pero contá con iterar un poco ahí; no es "un clic".
+
+### Decisiones que son tuyas
+
+1. **Dominio**: `cotejo.ar`, `cotejo.com.ar`, otro. (Ya no está hardcodeado: el código
+   toma `NEXT_PUBLIC_SITE_URL`.)
+2. **Canal de las alertas de precio**: email (necesita Resend/SendGrid), push, o solo
+   panel interno.
+3. **Cuándo lanzar.** Condiciona todo lo demás.
+4. **Login con Google/GitHub**, además del propio.
+
+---
+
+## 2. ¿Alcanza una base de datos gratis?
+
+Medido sobre los datos reales del proyecto, no estimado:
+
+| Tabla | Bytes por fila (datos) | Con overhead de Postgres |
+|---|---|---|
+| `listing` (una publicación) | 238 | ~500 |
+| `price_history` (un punto) | 31 | ~100 |
+| `product` | 121 | ~300 |
+
+| Plan gratis | Espacio | Publicaciones que entran |
+|---|---|---|
+| **Neon** | 512 MB | ~1.000.000 |
+| **Supabase** | 500 MB | ~1.000.000 |
+
+**Un millón de publicaciones entra en el plan gratis.** Hoy tenés 426. El catálogo entero
+de las tres tiendas son decenas de miles, no millones. **El catálogo no es el problema.**
+
+### El problema real es el historial de precios
+
+Esa tabla crece para siempre:
+
+```
+50.000 publicaciones × 1 punto por día × 365 días = 18.000.000 filas ≈ 1,8 GB
+```
+
+Ahí sí revienta cualquier plan gratis. Se resuelve con dos reglas:
+
+1. **Guardar un punto solo cuando el precio cambia.** ✅ Ya implementado.
+2. **Borrar lo más viejo de 90 días.** ❌ Falta (ver §4-C). Con esto el historial se
+   estabiliza en decenas de MB y nunca crece más.
+
+### Dos trampas de los planes gratis
+
+- **Supabase pausa el proyecto** si no recibe requests durante una semana. Para un sitio
+  nuevo con poco tráfico, es un problema real.
+- **Neon limita horas de cómputo** (100 CU-hours/mes en el plan gratis), pero no pausa.
+
+**Recomendación: Neon.**
+
+### Lo que NO entra, para que quede claro
+
+**Precios Claros / SEPA** (el dato oficial del gobierno) son **~12 millones de registros
+por día**. Un solo día no entra en 500 MB. Si algún día se integra, hay que importar
+únicamente las categorías y comercios que interesen, nunca el volcado completo.
+
+---
+
+## 3. Alternativas de diseño
+
+### ¿Puede scrapear la computadora del usuario?
+
+**No, y no es una limitación de nuestro código.** El navegador lo prohíbe: una página
+servida desde `cotejo.ar` no puede leer la respuesta de `fravega.com` (política de mismo
+origen / CORS). La única forma sería que cada visitante instalara una extensión.
+
+**Pero el problema que querés resolver — "no guardar todos los productos del mundo" —
+sí tiene solución, y es mejor que esa.**
+
+### La alternativa correcta: caché bajo demanda
+
+Medición real de este proyecto, consultando las 3 tiendas en paralelo desde el servidor:
+
+```
+"iphone 15":        1762 ms
+"smart tv 55":      1530 ms
+"lavarropas drean": 2182 ms
+```
+
+**Dos segundos.** Eso habilita este diseño:
+
+> El usuario busca algo → si no está en la base, se les pide a las tiendas **en el
+> momento** (2s), se muestra **y se guarda**. La próxima persona que busque lo mismo lo
+> ve instantáneo.
+
+La base deja de ser "un catálogo del mundo" y pasa a ser **un caché de lo que la gente
+realmente busca**. Guardás miles de productos, no millones, y el plan gratis te sobra por
+años.
+
+Hoy esto está implementado **a medias**: `/search` consulta MercadoLibre en vivo cuando la
+base no alcanza, pero solo ML, y **no guarda el resultado**. Extenderlo a las tres tiendas
+VTEX y persistir lo que llega es la mejora de arquitectura más importante que queda
+pendiente (§4-A).
+
+### Cómo hacerlo más rápido
+
+Los 2 segundos son casi todos espera de red, no cálculo:
+
+1. **Devolver resultados a medida que llegan.** Naldo contesta en 640 ms y Frávega en
+   1758 ms; hoy se espera a la más lenta para mostrar todo.
+2. **Pasar los adapters a `async`.** Hoy son bloqueantes: dos usuarios buscando a la vez
+   se hacen cola. Es el cambio más importante para aguantar tráfico real (§5-2).
+3. **Caché de búsquedas frecuentes** (15 minutos). "iphone" lo van a buscar mil veces.
+
+### Sobre las herramientas open source de scraping
+
+Conviene tener clara una distinción: **hoy no estás scrapeando**. Estás usando las APIs
+JSON públicas de cada tienda — más rápido, más estable y más defendible que leer HTML.
+Meter Scrapy o Playwright para las tiendas que ya funcionan sería un **retroceso**.
+
+Dónde sí sirven herramientas de terceros:
+
+| Herramienta | Para qué | Veredicto |
+|---|---|---|
+| [OpenDataCordoba/precios_claros](https://github.com/OpenDataCordoba/precios_claros) | Portal oficial del gobierno | Útil si algún día querés supermercados. Es casi todo alimentos, no electro, y el volumen no entra en un plan gratis. |
+| **Playwright** | Tiendas sin API (Musimundo, Garbarino) | Último recurso: lento, frágil, y necesita un navegador corriendo en el servidor. |
+| **Scrapy** | Scraping a gran escala | No aporta nada sobre lo que ya hay. |
+
+**La forma más barata de sumar tiendas no es scrapear: es encontrar la API pública que ya
+tienen.** Frávega, Cetrogar y Naldo se integraron así, sin scrapear una sola línea de
+HTML. Vale la pena probar ese camino primero con cada tienda nueva.
+
+---
+
+## 4. Lo que puede hacer Claude
+
+Ordenado por impacto. Decime cuál querés.
+
+### A. 🥇 Búsqueda en vivo en las tres tiendas + guardado automático
+El cambio de arquitectura de §3. Hace que el sitio responda cualquier búsqueda, no solo
+lo que ya está cargado, y que la base crezca sola con lo que la gente busca.
+
+### B. 🥈 Alertas de bajada de precio
+Necesita que vos elijas el canal (email / push / panel).
+
+### C. 🥉 Retención de 90 días en el historial
+Es lo que evita que la base crezca sin límite. Media hora de trabajo, y hay que hacerlo
+**antes** de que la ingesta corra sola.
+
+### D. Categorías / navegación por rubro
+Los productos que crea el matcher no tienen categoría, así que no hay forma de navegar
+"todos los celulares". Se puede inferir del título o del breadcrumb de cada tienda.
 
 ### E. Panel de administración
-- Ver salud de las fuentes (ya hay datos: `GET /sources`), disparar ingestas, revisar
-  matches dudosos (ya se acumulan en `product_match` con su confianza).
-- **Lo hace Claude.**
+Salud de las fuentes (el dato ya existe en `/sources`), disparar ingestas, y revisar los
+matches dudosos — que ya se acumulan en `product_match` con su nivel de confianza.
 
-### F. ✅ Página de transparencia — HECHA: `/como-funciona`
+### F. Auto-renovación del token de ML
+Para no depender de que renueves a mano cada 6 horas.
 
-### G. SEO / sitemap — hecho salvo la imagen de Open Graph
-- Falta una imagen `og:image` (necesita una decisión de diseño tuya o una imagen).
+### G. Imagen de Open Graph
+Para que el link se vea bien al compartirlo. Necesita una decisión de diseño tuya.
 
-### H. ✅ Responsive mobile — verificado a 390px y 1600×600
-
-### I. Categorías / navegación por rubro
-- Los productos creados por el matcher no tienen `category`, así que no hay forma de
-  navegar "todos los celulares". Se puede inferir de los títulos o del breadcrumb que
-  devuelve cada tienda.
-- **Lo hace Claude.**
-
----
-
-## 🟡 ADAPTERS PENDIENTES (investigación a continuar)
-
-| Tienda | Estado | Próximo paso |
-|--------|--------|-------------|
-| **Musimundo** | En mantenimiento (2026-07-31) | Cuando vuelva online, Claude investiga su API y arma el adapter |
-| **Garbarino** | Timeout/bloqueado (curl da 000) | Claude puede probar en browser cuando vos me avisés |
-| **Mexx** | Sitio custom PHP, sin VTEX ni GraphQL evidente | Claude puede investigar en browser |
-| **Ribeiro** | 301 → sitio online, no investigado aún | Claude puede probar |
-
-Para avanzar con estos: decime "investigá Garbarino" y lo abro en el browser.
+### H. Adapters nuevos
+| Tienda | Estado |
+|---|---|
+| Musimundo | Sin API pública accesible en la última revisión |
+| Garbarino | El dominio no resolvía |
+| Megatone, Rodó, Casa del Audio | Probadas: no exponen API VTEX estándar |
+| Mexx, Ribeiro | Sin investigar |
 
 ---
 
-## 🔵 INFRAESTRUCTURA — para ir a producción (todo requiere acción tuya)
+## 5. Deuda técnica conocida
 
-Nada de esto es necesario para desarrollo local. Lo hacés cuando quieras subir el sitio.
+Nada de esto rompe hoy. Está acá para que no sorprenda después.
 
-### 1. Base de datos Postgres en la nube
-- Recomendado: **Neon** (gratis para dev, escala sola).
-- Pasos: crear cuenta en neon.tech → crear proyecto → copiar `DATABASE_URL`.
-- Una vez que tenés la URL, Claude adapta `backend/.env` y corre las migraciones.
+### 1. El matcher es O(n²)
+Medido: 250 publicaciones → 0,26 s; 4.000 → 30 s. Extrapolado, 40.000 → ~50 minutos.
+Con las 426 de hoy tarda menos de un segundo. **Antes de sumar la cuarta y quinta tienda**
+hay que agrupar por marca/código antes de comparar, en vez de comparar todos contra todos.
 
-### 2. Backend (FastAPI) en producción
-- Recomendado: **Railway** (tiene free tier, deploy desde GitHub con un clic).
-- Pasos:
-  1. Crear cuenta en railway.app.
-  2. "New Project" → "Deploy from GitHub repo" → elegir `comparador-de-precios/backend`.
-  3. Configurar variables de entorno en Railway (las mismas que en `.env`).
-  4. Railway te da una URL pública (ej. `api.cotejo.ar` si tenés dominio).
+### 2. Los adapters son bloqueantes
+FastAPI corre los endpoints sincrónicos en un pool de 40 hilos compartido. Si ML está
+lento, 40 búsquedas simultáneas pueden dejar sin responder al resto del backend —
+incluido `/health`, lo que haría que el hosting reinicie el proceso.
 
-### 3. Frontend (Next.js) en Vercel
-- Pasos:
-  1. Crear cuenta en vercel.com.
-  2. "Import Project" → conectar tu repositorio GitHub.
-  3. Root directory: `frontend`.
-  4. Agregar variable: `NEXT_PUBLIC_API_URL=https://tu-backend.railway.app`.
-  5. Vercel despliega automáticamente en cada push a `main`.
+### 3. `/sources` recalcula todo en cada visita
+Lee la tabla `listing` entera para calcular el ranking de tiendas. Tolerable hasta ~50.000
+publicaciones; a partir de ~300.000 hay que cachearlo. **Ya tiene el índice que le faltaba.**
 
-### 4. Redis (para Celery / alertas)
-- Recomendado: **Upstash** (gratis hasta 10k req/día).
-- Crear cuenta en upstash.com → crear Redis → copiar `REDIS_URL`.
-- Agregar `REDIS_URL` al `.env` y a Railway/Render.
+### 4. Las búsquedas por texto no usan índice
+`ILIKE '%texto%'` obliga a recorrer la tabla completa. La solución (índice GIN con
+`pg_trgm`) solo aplica a Postgres, así que recién se puede hacer después de desplegar.
 
-### 5. Dominio
-- Comprar `cotejo.ar` (o `.com` si `.ar` no está disponible) en NIC.ar o Namecheap.
-- Apuntar DNS:
-  - `cotejo.ar` → Vercel (frontend)
-  - `api.cotejo.ar` → Railway (backend)
-
-### 6. Google AdSense
-- Necesitás el sitio online con dominio propio antes de aplicar.
-- Aplicás en adsense.google.com con la URL del sitio publicado.
-- Google demora 1-4 semanas en aprobar.
-- Una vez aprobado, Claude integra los snippets en el frontend.
-
-### 7. CI/CD (GitHub Actions)
-- Para que los tests corran automáticamente antes de cada deploy.
-- Claude puede crear el workflow `.github/workflows/ci.yml` cuando vos quieras.
-
-### 8. Monitoreo en producción
-- Saber cuándo el sitio cae o un adapter se rompe.
-- Opciones gratuitas: Better Uptime (ping), Sentry (errores de código).
-- Claude integra Sentry en el backend/frontend cuando vos lo indiques.
+### 5. El historial no tiene límite de tamaño
+Ver §4-C. **Es lo único de esta lista que hay que resolver antes de automatizar la ingesta.**
 
 ---
 
-## 🔵 DECISIONES QUE TENÉS QUE TOMAR VOS
+## 6. Lo que ya está hecho
 
-1. **¿Nombre de dominio?** → `cotejo.ar`, `cotejo.com.ar`, `comparador.ar`…
-2. **¿Primero historial de precios o primero matching entre tiendas?** (ambos son útiles antes de lanzar)
-3. **¿Canal para alertas de precio?** → Email (necesita SendGrid/Resend), push notification, o solo panel interno.
-4. **¿Cuándo querés subir el sitio a producción?** → Condiciona cuándo empezar la infra.
-5. **¿Querés agregar login con Google/GitHub además del login propio?** → Requiere OAuth de Google.
+Para no volver a pedirlo:
 
----
+- ✅ **Tres tiendas con datos reales**: Frávega, Cetrogar y Naldo. 426 publicaciones.
+- ✅ **Matching entre tiendas**: 50 productos comparables entre 2 y 3 tiendas.
+- ✅ **Ranking de tiendas por competitividad** (`/sources`), con datos propios.
+- ✅ **Gráfico de historial de precios** en la ficha de producto.
+- ✅ **Página de transparencia** `/como-funciona`, alimentada en vivo.
+- ✅ **Pegar el link de cualquier tienda** en el buscador.
+- ✅ **SEO**: sitemap, robots, metadatos. Falta solo la imagen de Open Graph.
+- ✅ **Responsive**, verificado a 390 px y 1600×600.
+- ✅ **123 tests**.
+- ✅ **Seed de tiendas para producción** (`scripts/seed_sources.py`).
+- ✅ **Sin secretos en el repo** — auditado sobre todo el historial de git.
 
-## Resumen ejecutivo
+### Bugs corregidos el 2026-08-04 tras las auditorías
 
-| Urgencia | Tarea | Quién |
-|----------|-------|-------|
-| 🔴 Ahora | Crear app ML en devs portal y conseguir access_token | **Vos** |
-| 🔴 Ahora | Avisar a Claude para wrapear el token en el adapter | Claude |
-| 🟡 Pronto | Contratar Redis (Upstash gratis) para que la ingesta corra sola — sin eso el historial de precios no se llena | **Vos** |
-| 🟡 Pronto | Elegir el canal de las alertas de precio (email / push / panel) | **Vos** |
-| 🟡 Pronto | Categorías por producto + panel de admin | Claude |
-| 🔵 Cuando quieras lanzar | Contratar Neon + Railway + Vercel + dominio | **Vos** |
-| 🔵 Cuando quieras lanzar | Pedir a Claude que conecte todo | Claude |
-| 🔵 Post-lanzamiento | Aplicar a AdSense | **Vos** |
+Los que cambiaban lo que veía el usuario:
+
+- El cluster del **iPhone 13 se había comido publicaciones de iPhone 14 y 15**, y mostraba
+  un rango de precios que comparaba tres teléfonos distintos.
+- Dos tiendas que publicaban **el mismo televisor con el código del fabricante** quedaban
+  en clusters separados, o sea sin comparar — justo lo que el sitio existe para hacer.
+- Los **links a Frávega** llevaban a su página de búsqueda en vez de al producto.
+- `/search` devolvía **error 500 en la home** si MercadoLibre respondía con HTML.
+- El **sitemap no incluía ningún producto** (pedía 200 y el máximo era 100).
+
+Los que te iban a frenar en el deploy:
+
+- `CORS_ORIGINS` en el formato que documentaba el ejemplo **impedía que la app arrancara**.
+- Un **token de ML vencido dejaba la fuente marcada como "bloqueada por ToS" para siempre**,
+  y eso se publicaba en la página de transparencia.
+- **No existía forma de sembrar las tiendas** en una base nueva.
+- Ningún campo se truncaba: en Postgres, **un título largo aborta la corrida entera** del
+  matcher (SQLite no dice nada).
+- `DATABASE_URL` tenía un default que apuntaba a un Postgres de producción inventado.

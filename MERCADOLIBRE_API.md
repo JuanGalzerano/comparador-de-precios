@@ -75,6 +75,12 @@ cuenta. **No es necesario ahora** — el comparador solo lee datos públicos.
 
 ## 3. Poner el token en el adapter
 
+> **✅ Los pasos 3b y 3c YA ESTÁN HECHOS en el código** (verificado 2026-08-04).
+> `app/config.py` declara `ml_access_token` / `ml_client_id` / `ml_client_secret`, y tanto
+> `MercadoLibreAdapter._client()` como la búsqueda en vivo de `/search` inyectan el header
+> `Authorization`. **Solo tenés que hacer el paso 3a** (poner la variable en `.env`) y
+> reiniciar. Se dejan documentados para entender qué hace el código.
+
 ### 3a. En `backend/.env`
 
 Agregar el token obtenido en §2a directamente (para desarrollo rápido):
@@ -198,12 +204,23 @@ suficientes para cientos de productos.
 [ ] 1. Crear app en developers.mercadolibre.com.ar
 [ ] 2. Copiar client_id y client_secret → backend/.env
 [ ] 3. Ejecutar el curl de §2a → copiar access_token → backend/.env
-[ ] 4. Agregar ml_client_id / ml_client_secret / ml_access_token a app/config.py Settings
-[ ] 5. Modificar MercadoLibreAdapter._client() para inyectar el Authorization header
-[ ] 6. Correr: python -m app.workers.ingest mercadolibre --term "iphone 13" --max-results 20
-[ ] 7. Verificar que GET /search?q=iphone devuelve resultados con permalinks reales
-[ ] 8. (Prod) Implementar auto-renovación del token (§3d) o un cron que lo renueve cada 5h
+[x] 4. Agregar ml_access_token a app/config.py Settings              (YA HECHO)
+[x] 5. Inyectar el header Authorization en el adapter y en /search   (YA HECHO)
+[ ] 6. Reiniciar el backend
+[ ] 7. Correr: python -m app.workers.ingest mercadolibre --term "iphone 13" --max-results 20
+[ ] 8. Verificar que GET /search?q=iphone devuelve resultados con permalinks reales
+[ ] 9. (Prod) Implementar auto-renovación del token (§3d) o un cron que lo renueve cada 5h
 ```
+
+Verificado contra el código (2026-08-04):
+
+- La fuente `mercadolibre` está hoy en estado `blocked_tos_review` porque la API responde
+  403. **Eso NO impide correr la ingesta**: el worker resuelve la fuente por slug, sin
+  mirar el estado — y una corrida exitosa ahora la reactiva sola.
+- ML devuelve **403 tanto si te bloqueó como si se venció el token** (dura 6 horas). Por
+  eso el paso 9 importa: sin auto-renovación, cada 6 horas la ingesta vuelve a fallar.
+- La búsqueda en vivo de `/search` (`_ml_live_search`) **antes no mandaba el token**, así
+  que iba a seguir devolviendo vacío aun con el token bien configurado. Corregido.
 
 ---
 
