@@ -76,7 +76,7 @@ def test_search_normalizes_correctly():
     assert listing.title == "iPhone 13 128GB (99991111)"
     assert listing.price == Decimal("1399999")
     assert listing.currency == "ARS"
-    assert listing.permalink == "https://www.fravega.com/producto/iphone-13-128gb-99991111/99991111/"
+    assert listing.permalink == "https://www.fravega.com/p/iphone-13-128gb-99991111-99991111/"
     assert listing.seller_name == "ShopWide"
     assert listing.product_hint.brand == "Apple"
     assert listing.condition == ItemCondition.UNKNOWN
@@ -201,7 +201,7 @@ def test_normalize_permalink_uses_config_base_url():
     sku = _sku("TSTSKU")
     raw = RawListing(source_slug="fravega", external_id="TSTSKU", payload=sku)
     listing = _adapter(base_url="https://www.fravega.com").normalize(raw)
-    assert listing.permalink == "https://www.fravega.com/producto/iphone-13-128gb-TSTSKU/TSTSKU/"
+    assert listing.permalink == "https://www.fravega.com/p/iphone-13-128gb-tstsku-TSTSKU/"
 
 
 # ---------------------------------------------------------------------------
@@ -226,3 +226,35 @@ def test_health_check_down_on_500():
     respx.post(GQL_URL).mock(return_value=httpx.Response(500))
     status = _adapter().health_check()
     assert not status.ok
+
+
+# ---------------------------------------------------------------------------
+# normalize(): formato de permalink verificado contra el sitio real
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_permalink_uses_the_public_product_url_format():
+    """Frávega sirve el producto en `/p/{slug}-{code}/`.
+
+    El formato anterior (`/producto/{slug}/{code}/`) devolvía HTTP 200 pero
+    renderizaba la página de resultados de búsqueda, así que el botón "Ir a la
+    publicación" llevaba a un listado genérico en vez de al producto. Verificado
+    contra los links que genera el propio buscador de fravega.com.
+    """
+    sku = _sku("364753")
+    raw = RawListing(source_slug="fravega", external_id="364753", payload=sku)
+    listing = _adapter().normalize(raw)
+    assert "/p/" in listing.permalink
+    assert listing.permalink.endswith("-364753/")
+    assert "/producto/" not in listing.permalink
+
+
+def test_normalize_permalink_strips_non_ascii_from_slug():
+    """El slug de la API trae comillas tipográficas (`15-6”-amd`) que rompen la URL."""
+    sku = _sku("364753")
+    sku["item"]["slug"] = 'notebook-hp-15-6”-amd-ryzen-3-15-fc0235la'
+    raw = RawListing(source_slug="fravega", external_id="364753", payload=sku)
+    listing = _adapter().normalize(raw)
+    assert listing.permalink == (
+        "https://www.fravega.com/p/notebook-hp-15-6-amd-ryzen-3-15-fc0235la-364753/"
+    )

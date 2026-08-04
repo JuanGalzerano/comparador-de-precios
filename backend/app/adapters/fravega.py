@@ -24,11 +24,12 @@ Campos que esta fuente NO provee (se dejan en None, no se inventan):
 - warranty_months / warranty_type: no expuesto en la búsqueda.
 
 Precios: `salePrice` y `listPrice` son ARS enteros (e.g. 1_399_999 = $ 1.399.999).
-Permalink: `https://www.fravega.com/producto/{slug}/{code}/`
+Permalink: `https://www.fravega.com/p/{slug}-{code}/` (ver `_permalink`).
 """
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
@@ -226,6 +227,20 @@ class FravegaAdapter(BaseSourceAdapter):
 
     # --- normalize (pura) ---------------------------------------------------
 
+    def _permalink(self, slug: str, code: str) -> str:
+        """URL pública del producto: `{base}/p/{slug}-{code}/`.
+
+        Verificado contra los links que el propio buscador de Frávega genera. El formato
+        `/producto/{slug}/{code}/` que se usaba antes devolvía 200 pero renderizaba la
+        página de resultados de búsqueda, no el producto.
+
+        El slug que devuelve la API puede traer comillas tipográficas y otros caracteres
+        no-ASCII (`notebook-hp-15-6”-amd-...`); Frávega sirve la misma página con el slug
+        limpio, así que se normalizan a guiones en vez de percent-encodearlos.
+        """
+        cleaned = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
+        return f"{self._base_url()}/p/{cleaned}-{code}/"
+
     def normalize(self, raw: RawListing) -> NormalizedListingInput:
         item = raw.payload
         external_id = raw.external_id or str(item.get("code", ""))
@@ -243,8 +258,7 @@ class FravegaAdapter(BaseSourceAdapter):
                 origin_ref=raw.origin_ref,
             )
 
-        slug = inner.get("slug") or external_id
-        permalink = f"{self._base_url()}/producto/{slug}/{external_id}/"
+        permalink = self._permalink(inner.get("slug") or external_id, external_id)
 
         pricing = item.get("pricing") or {}
         raw_price = pricing.get("salePrice")

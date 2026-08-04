@@ -82,11 +82,31 @@ Estas cosas **no las hice todavía** porque esperaban que el MVP básico estuvie
 - Necesitás definir: ¿aviso por email? ¿por notificación push? ¿solo en el panel?
 - **Decisión tuya** sobre el canal; implementación la hace Claude.
 
-### C. Worker de ingesta automático (Celery + cron)
-- Hoy la ingesta corre a mano (`python -m app.workers.ingest`).
-- Para que los precios se actualicen solos necesitás Redis + Celery.
-- Necesitás contratar Redis (Upstash gratis sirve para empezar — ver `INFRAESTRUCTURA.md`).
-- Una vez que tenés el `REDIS_URL`, Claude arma el worker de Celery.
+### C. Worker de ingesta automático — el pendiente más importante
+
+Hoy la ingesta corre a mano (`python -m app.workers.ingest`), así que **los precios son
+una foto del día que la corrí y el gráfico de historial casi no tiene puntos**. Sin esto,
+la promesa de "detectar ofertas que no bajaron nada" no se puede cumplir: no hay con qué
+comparar.
+
+**Qué es Upstash / Redis (por si no te suena):** Redis es una base de datos en memoria,
+muy rápida. Acá no se usa para guardar productos (eso sigue en Postgres) sino como **cola
+de tareas**: la lista de "traer precios de Frávega a las 9, a las 13 y a las 17". Celery
+es el programa que lee esa cola y ejecuta las tareas. Upstash es un Redis alojado en la
+nube, con plan gratis de 10.000 comandos por día — muchísimo más de lo que esto necesita.
+
+Dos caminos, elegí uno:
+
+| | Upstash + Celery | Programador de tareas de Windows |
+|---|---|---|
+| Costo | Gratis | Gratis |
+| Sirve para producción | Sí | No — solo mientras tu PC esté prendida |
+| Qué tenés que hacer | Crear cuenta en upstash.com, crear una base Redis, copiar el `REDIS_URL` y pasármelo | Nada, lo configuro yo |
+| Cuánto tarda | 5 minutos tuyos | 0 |
+
+**Mi recomendación:** empezá por el Programador de tareas de Windows para que el historial
+se empiece a llenar desde hoy, y pasá a Upstash cuando subas el sitio a internet. Decime
+"configurá la tarea programada" y lo hago.
 
 ### D. ✅ Matching entre tiendas — HECHO (2026-08-04)
 - `app/matching/` agrupa el mismo producto de distintas tiendas. 32 clusters
