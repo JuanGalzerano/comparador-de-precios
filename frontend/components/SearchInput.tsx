@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { parseMlUrl } from "@/lib/ml-url";
+import { parseProductUrl } from "@/lib/ml-url";
 
 interface SearchInputProps {
   defaultValue?: string;
@@ -16,29 +16,29 @@ interface SearchInputProps {
  */
 export function SearchInput({ defaultValue = "", placeholder, style }: SearchInputProps) {
   const [value, setValue] = useState(defaultValue);
-  const [mlDetected, setMlDetected] = useState(false);
+  const [urlDetected, setUrlDetected] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const v = e.target.value;
     setValue(v);
-    setMlDetected(false);
+    setUrlDetected(null);
 
-    const ml = parseMlUrl(v);
-    if (ml) {
-      setValue(ml.terms);
-      setMlDetected(true);
+    const link = parseProductUrl(v);
+    if (link) {
+      setValue(link.terms);
+      setUrlDetected(link.source);
     }
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
     const pasted = e.clipboardData.getData("text");
-    const ml = parseMlUrl(pasted);
-    if (!ml) return;
+    const link = parseProductUrl(pasted);
+    if (!link) return;
 
     e.preventDefault();
-    setValue(ml.terms);
-    setMlDetected(true);
+    setValue(link.terms);
+    setUrlDetected(link.source);
   }
 
   return (
@@ -55,7 +55,7 @@ export function SearchInput({ defaultValue = "", placeholder, style }: SearchInp
         aria-label="Buscar un producto"
         style={{ width: "100%", ...style, flex: undefined, maxWidth: undefined }}
       />
-      {mlDetected && (
+      {urlDetected && (
         <span
           style={{
             position: "absolute",
@@ -71,7 +71,7 @@ export function SearchInput({ defaultValue = "", placeholder, style }: SearchInp
             pointerEvents: "none",
           }}
         >
-          Link de MercadoLibre detectado ✓
+          Link de {urlDetected} detectado — comparando en todas las tiendas ✓
         </span>
       )}
     </div>

@@ -3,11 +3,47 @@
 Documento vivo. Se actualiza en cada iteración (implementación, revisión, o ronda de mejoras)
 — no es una foto única, es el registro acumulado del proyecto.
 
-Última actualización: 2026-07-31 (iteración 3).
+Última actualización: 2026-08-04 (iteración 4).
 
 ---
 
 ## Funcionalidad actual (lo que YA funciona, verificado con tests y preview local)
+
+### Novedades de la iteración 4 (2026-08-04)
+
+- **Tres tiendas con datos REALES en la base**: Frávega (159 publicaciones), Cetrogar (141)
+  y Naldo (126) — 335 publicaciones y ~250 productos traídos por el worker de ingesta
+  contra las APIs públicas de catálogo de cada tienda. Ya no es un catálogo de ejemplo.
+- **Matcher cross-retailer** (`app/matching/`): agrupa publicaciones de distintas tiendas
+  en un mismo producto. 32 clusters multi-tienda reales (ej. la misma notebook HP a
+  $949.999 en Frávega y $1.289.999 en Cetrogar: 340k de diferencia). Guardas duras contra
+  falsos positivos: marca, capacidad de almacenamiento, variante (Pro/Mini/Max) y código
+  de modelo del fabricante. CLI: `python -m app.workers.match`; corre solo después de
+  cada ingesta.
+- **`GET /sources`**: estado de cada fuente + `win_rate` = en qué fracción de los productos
+  donde compite contra otra tienda tiene el precio más bajo. Alimenta la página de
+  transparencia y el ranking de tiendas en la home. Hoy: Frávega 75%, Cetrogar 45%,
+  Naldo 30%.
+- **`GET /search?sort=`**: `price` (default), `retailers` (más tiendas comparadas primero)
+  y `spread` (mayor diferencia de precio). Más `min_retailers=2` para pedir solo productos
+  efectivamente comparables.
+- **Adapter VTEX con dos sabores**: Intelligent Search (Cetrogar, Naldo) y Catalog System
+  clásico (`api_flavor: "legacy_catalog"` en `config_json`), para tiendas que devuelven 404
+  en IS.
+- **De qué tienda es cada precio**: `retailer_name`/`retailer_slug` en cada publicación y
+  `retailer_count`/`retailer_names` en cada cluster. La tabla comparativa tiene columna
+  "Tienda"; las tarjetas muestran "3 tiendas".
+- **Gráfico de historial de precios** en la ficha de producto (mínimo diario de los últimos
+  90 días, SVG propio sin librerías nuevas).
+- **Página `/como-funciona`** (transparencia): de dónde sale cada dato, cómo se calcula el
+  score, estado real de cada fuente en vivo desde `/sources`.
+- **Footer** en todo el sitio + `/como-funciona` en el sitemap.
+- **Pegar el link de CUALQUIER tienda** (no solo MercadoLibre) en el buscador: se extraen
+  los términos del slug de la URL y se busca ese producto en todas las fuentes, con un
+  banner que lo explica y link a la publicación original.
+- **Responsive real**: verificado a 390px y a 1600×600 sin desbordes horizontales. La tabla
+  comparativa scrollea sola y esconde columnas por prioridad en pantallas chicas.
+- **111 tests pasando** (eran 51).
 
 - **Modelo de datos** (Postgres/SQLAlchemy): `retailer_source`, `product`, `listing`,
   `price_history`, `product_match`, `user_event`. Migración Alembic inicial aplicada.
@@ -67,14 +103,20 @@ contra la realidad antes de confiar en ellas a ciegas:
 
 - **Frontend real en Next.js**: ✅ implementado (iteración 3). Páginas, header, home,
   detección de URL de ML — todo funcionando en `http://localhost:3000` contra el backend.
-- Historial de precios con gráfico en el frontend + alertas de baja de precio.
-- Programar el worker de ingesta (Celery/cron) para que corra solo — hoy `app/workers/ingest.py`
-  existe y funciona pero hay que ejecutarlo a mano o vía CLI.
-- Adapter VTEX (Frávega/Cetrogar) — pendiente de aprobación explícita por el riesgo de ToS.
-- Matching/dedup entre tiendas (fuzzy + embeddings) — recién tiene sentido con ≥2 fuentes.
-- Panel de administración (salud de fuentes, cola de revisión de matches).
-- SEO/SSR, accesibilidad, responsive mobile, analytics.
-- Página de transparencia (qué fuente es API oficial vs. no sancionada).
+- ✅ Historial de precios con gráfico en el frontend (iteración 4). Falta alertas de baja.
+- ✅ Adapter VTEX (Cetrogar/Naldo) + adapter propio de Frávega, con datos reales.
+- ✅ Matching/dedup entre tiendas (iteración 4, `app/matching/`). Falta la vía de
+  embeddings para categorías sin código de modelo.
+- ✅ Página de transparencia `/como-funciona` con datos en vivo de `/sources`.
+- ✅ Responsive mobile verificado.
+- Alertas de baja de precio (falta decidir el canal: email / push / panel).
+- Programar el worker de ingesta (Celery/cron) para que corra solo — hoy
+  `app/workers/ingest.py` funciona pero hay que ejecutarlo a mano o vía CLI.
+- Panel de administración (salud de fuentes, cola de revisión de matches — la cola ya se
+  llena: `product_match` guarda los candidatos dudosos con su confianza).
+- Categoría por producto: hoy los productos creados por el matcher no tienen `category`,
+  así que no hay navegación por rubro.
+- Analytics.
 
 Plan completo con fases y tabla de delegación por modelo:
 `C:\Users\juani\.claude\plans\ahora-hace-un-plan-idempotent-chipmunk.md`.
@@ -114,6 +156,16 @@ que el sitio esté online y lo use gente real.
   sin trackear en git (no se commiteó, a la espera de que el usuario lo pida). El usuario
   reprioriza manualmente: siguiente iteración va directo a frontend Next.js en vez del
   próximo ítem que hubiera elegido el revisor.
+- **2026-08-04 (4)**: el sitio pasa de "esqueleto con datos de ejemplo" a comparador real.
+  Ingesta con datos reales de Frávega/Cetrogar/Naldo (335 publicaciones), matcher
+  cross-retailer propio (`app/matching/`, 32 clusters multi-tienda), `GET /sources` con
+  competitividad de precio por tienda, órdenes nuevos en `/search`
+  (`retailers`/`spread`/`min_retailers`), tienda visible en cada precio, gráfico de
+  historial, `/como-funciona`, footer, detección de links de cualquier tienda, responsive
+  verificado a 390px y 1600×600. 51 → 111 tests. **Nota:** no se pudieron sacar capturas
+  de pantalla en esta sesión (el panel del navegador no estaba visible, no compone frames);
+  la verificación visual se hizo midiendo el layout real por DOM (anchos, desbordes,
+  columnas visibles), no a ojo.
 - **2026-07-31 (3)**: frontend Next.js completo verificado en preview local. Páginas
   login/registro/perfil/favoritos + header real + secciones home implementadas. Feature:
   detección de URL de MercadoLibre en el buscador (`lib/ml-url.ts`, `SearchInput.tsx`,

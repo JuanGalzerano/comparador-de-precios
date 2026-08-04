@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Query
@@ -39,6 +39,7 @@ from app.api.deps import DbSession
 from app.enums import ItemCondition
 from app.models.listing import Listing
 from app.models.product import Product
+from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
 from app.schemas.search import ProductClusterOut, SearchResponse
 
@@ -100,6 +101,29 @@ def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
     return results
 
 
+SearchSort = Literal["price", "retailers", "spread"]
+
+
+def _order_by(sort: SearchSort) -> list[ColumnElement[Any]]:
+    """Orden del listado de clusters.
+
+    - `price` (default): el cluster más barato primero, el orden histórico.
+    - `retailers`: primero los productos que se pueden comparar entre más tiendas —
+      es donde el comparador realmente sirve.
+    - `spread`: mayor diferencia entre la publicación más cara y la más barata del
+      mismo producto: donde elegir bien ahorra más plata.
+    """
+    cheapest = func.min(Listing.final_price)
+    retailers = func.count(func.distinct(Listing.retailer_source_id))
+    spread = func.max(Listing.final_price) - func.min(Listing.final_price)
+
+    if sort == "retailers":
+        return [retailers.desc(), spread.desc(), Product.id.asc()]
+    if sort == "spread":
+        return [spread.desc(), retailers.desc(), Product.id.asc()]
+    return [cheapest.asc(), Product.id.asc()]
+
+
 def _build_filters(
     *,
     q: str | None,
@@ -137,6 +161,17 @@ def search(
     q: str | None = Query(default=None, description="Termino de busqueda libre."),
     category: str | None = Query(default=None, description="Categoria canonica de Cotejo."),
     condition: Literal["all", "new", "used", "refurbished", "unknown"] = Query(default="all"),
+    sort: SearchSort = Query(
+        default="price",
+        description="price = más barato primero; retailers = más tiendas comparadas; "
+        "spread = mayor diferencia de precio entre tiendas.",
+    ),
+    min_retailers: int = Query(
+        default=1,
+        ge=1,
+        description="Mínimo de tiendas distintas que deben publicar el producto. "
+        "Con 2, solo devuelve productos efectivamente comparables entre tiendas.",
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> SearchResponse:
@@ -151,6 +186,7 @@ def search(
         select(
             Product.id.label("product_id"),
             func.count(Listing.id).label("listing_count"),
+            func.count(func.distinct(Listing.retailer_source_id)).label("retailer_count"),
             func.min(Listing.final_price).label("min_final_price"),
             func.max(Listing.final_price).label("max_final_price"),
         )
@@ -159,16 +195,15 @@ def search(
         .where(*filters)
         .group_by(Product.id)
     )
+    if min_retailers > 1:
+        agg_stmt = agg_stmt.having(
+            func.count(func.distinct(Listing.retailer_source_id)) >= min_retailers
+        )
 
     total = db.execute(select(func.count()).select_from(agg_stmt.subquery())).scalar_one()
 
     page_stmt = (
-        agg_stmt.order_by(
-            func.min(Listing.final_price).asc(),
-            Product.id.asc(),
-        )
-        .limit(page_size)
-        .offset((page - 1) * page_size)
+        agg_stmt.order_by(*_order_by(sort)).limit(page_size).offset((page - 1) * page_size)
     )
     agg_rows = db.execute(page_stmt).all()
 
@@ -192,12 +227,26 @@ def search(
     for listing in db.scalars(listings_stmt).all():
         listings_by_product[listing.product_id].append(listing)
 
+    retailer_labels = {
+        row.id: (row.display_name or row.slug)
+        for row in db.execute(
+            select(RetailerSource.id, RetailerSource.slug, RetailerSource.display_name)
+        ).all()
+    }
+
     items: list[ProductClusterOut] = []
     for row in agg_rows:
         product = products_by_id[row.product_id]
         cluster_listings = listings_by_product.get(row.product_id, [])
         scores = score_listings(cluster_listings)
         best_score = max(scores) if scores else 0
+        cluster_retailers = sorted(
+            {
+                retailer_labels.get(listing.retailer_source_id, "")
+                for listing in cluster_listings
+            }
+            - {""}
+        )
         items.append(
             ProductClusterOut(
                 id=product.id,
@@ -207,6 +256,8 @@ def search(
                 category=product.category,
                 catalog_product_id=product.catalog_product_id,
                 listing_count=row.listing_count,
+                retailer_count=len(cluster_retailers),
+                retailer_names=cluster_retailers,
                 min_final_price=Decimal(row.min_final_price),
                 max_final_price=Decimal(row.max_final_price),
                 best_score=best_score,

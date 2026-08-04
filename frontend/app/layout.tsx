@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { HeaderAuth } from "@/components/HeaderAuth";
 import { SearchInput } from "@/components/SearchInput";
+import { Footer } from "@/components/Footer";
 import "../styles/nocturne.css";
 
 export const metadata: Metadata = {
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--color-bg)" }}>
           <header
+            className="site-header"
             style={{
               position: "sticky",
               top: 0,
@@ -52,6 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }}
           >
             <div
+              className="site-header-inner"
               style={{
                 maxWidth: 1240,
                 margin: "0 auto",
@@ -63,13 +66,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             >
               <Link
                 href="/"
+                className="site-brand"
                 style={{ display: "flex", alignItems: "center", gap: 7, textDecoration: "none", color: "inherit", flexShrink: 0 }}
               >
                 <span style={{ fontSize: 18, color: "var(--color-accent)", lineHeight: 1 }}>⚖</span>
                 <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.02em" }}>Cotejo</span>
               </Link>
 
-              <form action="/" method="get" style={{ flex: 1, maxWidth: 520 }}>
+              <form action="/" method="get" className="site-search-form" style={{ flex: 1, maxWidth: 520 }}>
                 <SearchInput placeholder="Buscar producto o pegar link de MercadoLibre" />
               </form>
 
@@ -80,6 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </header>
 
           <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>{children}</div>
+          <Footer />
         </div>
       </body>
     </html>

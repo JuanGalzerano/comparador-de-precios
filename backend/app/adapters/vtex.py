@@ -57,6 +57,37 @@ JsonDict = dict[str, Any]
 DEFAULT_BASE_URL = "https://www.cetrogar.com.ar"
 DEFAULT_PAGE_SIZE = 48
 _IS_PATH = "/api/io/_v/api/intelligent-search/product_search/trade-policy/1"
+_LEGACY_PATH = "/api/catalog_system/pub/products/search"
+
+#: Dos sabores de API VTEX conviven en las tiendas argentinas: Intelligent Search
+#: (Cetrogar, Naldo) y el Catalog System clásico (Frávega, que devuelve 404 en IS).
+#: Se elige por `config_json.api_flavor`; la forma del payload difiere y `normalize`
+#: la detecta por presencia de `priceRange` (IS) vs. `items[].sellers[]` (legacy).
+FLAVOR_INTELLIGENT_SEARCH = "intelligent_search"
+FLAVOR_LEGACY_CATALOG = "legacy_catalog"
+
+
+def _total_from_resources_header(header: str | None, fallback: int) -> int:
+    """`resources: items 0-23/357` -> 357. Sin header, el total es lo que llegó."""
+    if not header or "/" not in header:
+        return fallback
+    try:
+        return int(header.rsplit("/", 1)[1])
+    except ValueError:
+        return fallback
+
+
+def _first_offer(product: JsonDict) -> JsonDict:
+    """`commertialOffer` del primer seller con stock (o del primero, si ninguno informa)."""
+    for item in product.get("items") or []:
+        sellers = item.get("sellers") or []
+        for seller in sellers:
+            offer = seller.get("commertialOffer") or {}
+            if (offer.get("AvailableQuantity") or 0) > 0:
+                return offer
+        if sellers:
+            return sellers[0].get("commertialOffer") or {}
+    return {}
 
 
 @register_default_for_kind(SourceKind.VTEX)
@@ -81,6 +112,19 @@ class VtexAdapter(BaseSourceAdapter):
     def _base_url(self) -> str:
         return (self.config.base_url or DEFAULT_BASE_URL).rstrip("/")
 
+    def _flavor(self) -> str:
+        return getattr(self.config, "api_flavor", None) or FLAVOR_INTELLIGENT_SEARCH
+
+    def _search_path(self) -> str:
+        return _LEGACY_PATH if self._flavor() == FLAVOR_LEGACY_CATALOG else _IS_PATH
+
+    def _search_params(self, term: str, page: int, page_size: int) -> dict[str, Any]:
+        if self._flavor() == FLAVOR_LEGACY_CATALOG:
+            offset = (page - 1) * page_size
+            # El Catalog System pagina por rango inclusivo de índices, no por nro. de página.
+            return {"ft": term, "_from": offset, "_to": offset + page_size - 1}
+        return {"query": term, "count": page_size, "page": page}
+
     def _client(self) -> httpx.Client:
         headers: dict[str, str] = {
             "Accept": "application/json",
@@ -98,12 +142,18 @@ class VtexAdapter(BaseSourceAdapter):
         )
 
     def _get(self, client: httpx.Client, params: dict[str, Any]) -> JsonDict:
-        """GET al endpoint IS con reintentos para 5xx/429."""
+        """GET al endpoint de búsqueda con reintentos para 5xx/429.
+
+        Normaliza ambos sabores a la forma de IS (`{"products": [...],
+        "recordsFiltered": N}`): el Catalog System devuelve una lista pelada y el total
+        en el header `resources` (`items 0-23/357`).
+        """
         attempts = max(1, self.config.max_retries)
+        path = self._search_path()
         last_error: Exception | None = None
         for _ in range(attempts):
             try:
-                response = client.get(_IS_PATH, params=params)
+                response = client.get(path, params=params)
             except httpx.TimeoutException as exc:
                 last_error = SourceUnavailable(
                     f"timeout en IS: {exc}", source_slug=self.source_slug
@@ -126,7 +176,15 @@ class VtexAdapter(BaseSourceAdapter):
                 )
                 continue
 
-            return response.json()
+            payload = response.json()
+            if isinstance(payload, list):
+                return {
+                    "products": payload,
+                    "recordsFiltered": _total_from_resources_header(
+                        response.headers.get("resources"), len(payload)
+                    ),
+                }
+            return payload
 
         assert last_error is not None
         raise last_error
@@ -146,11 +204,7 @@ class VtexAdapter(BaseSourceAdapter):
                 if max_pages is not None and pages_fetched >= max_pages:
                     return
 
-                params: dict[str, Any] = {
-                    "query": query.term or "",
-                    "count": page_size,
-                    "page": page,
-                }
+                params = self._search_params(query.term or "", page, page_size)
                 params.update(query.raw_params)
 
                 data = self._get(client, params)
@@ -161,7 +215,10 @@ class VtexAdapter(BaseSourceAdapter):
                 if not products:
                     return
 
-                origin = f"{self._base_url()}{_IS_PATH}?query={query.term or ''}&page={page}"
+                origin = (
+                    f"{self._base_url()}{self._search_path()}"
+                    f"?q={query.term or ''}&page={page}"
+                )
                 for product in products:
                     if max_results is not None and emitted >= max_results:
                         return
@@ -198,9 +255,13 @@ class VtexAdapter(BaseSourceAdapter):
         link_text = p.get("linkText") or external_id
         permalink = f"{self._base_url()}/{link_text}/p"
 
-        price_range = p.get("priceRange") or {}
-        selling = price_range.get("sellingPrice") or {}
-        raw_price = selling.get("lowPrice")
+        offer = _first_offer(p)
+
+        # IS trae el precio agregado en `priceRange`; el Catalog System solo lo trae
+        # dentro de la oferta del primer seller disponible.
+        raw_price = ((p.get("priceRange") or {}).get("sellingPrice") or {}).get("lowPrice")
+        if raw_price is None:
+            raw_price = offer.get("Price")
         if raw_price is None:
             raise NormalizationError(
                 f"item {external_id} sin sellingPrice",
@@ -210,24 +271,19 @@ class VtexAdapter(BaseSourceAdapter):
 
         brand_name = (p.get("brand") or None) or None
 
-        # installments: primer item, primer seller, primera opción sin interés con más cuotas
+        # installments: primer item, primer seller, la opción sin interés con más cuotas
         installments_qty: int | None = None
         installments_amount: Decimal | None = None
         interest_free: bool | None = None
-        items = p.get("items") or []
-        if items:
-            sellers = (items[0].get("sellers") or [])
-            if sellers:
-                offer = sellers[0].get("commertialOffer") or {}
-                raw_installments: list[JsonDict] = offer.get("Installments") or []
-                free = [i for i in raw_installments if i.get("InterestRate") == 0]
-                if free:
-                    best = max(free, key=lambda i: i.get("NumberOfInstallments", 0))
-                    installments_qty = best.get("NumberOfInstallments")
-                    installments_amount = (
-                        Decimal(str(best["Value"])) if best.get("Value") is not None else None
-                    )
-                    interest_free = True
+        raw_installments: list[JsonDict] = offer.get("Installments") or []
+        free = [i for i in raw_installments if i.get("InterestRate") == 0]
+        if free:
+            best = max(free, key=lambda i: i.get("NumberOfInstallments", 0))
+            installments_qty = best.get("NumberOfInstallments")
+            installments_amount = (
+                Decimal(str(best["Value"])) if best.get("Value") is not None else None
+            )
+            interest_free = True
 
         try:
             return NormalizedListingInput(
@@ -268,7 +324,7 @@ class VtexAdapter(BaseSourceAdapter):
         start = time.monotonic()
         try:
             with self._client() as client:
-                data = self._get(client, {"query": "test", "count": 1, "page": 1})
+                data = self._get(client, self._search_params("test", 1, 1))
         except BlockedBySource as exc:
             return HealthStatus(
                 source_slug=self.source_slug,

@@ -26,6 +26,7 @@ from app.enums import ItemCondition
 from app.models.listing import Listing
 from app.models.price_history import PriceHistory
 from app.models.product import Product
+from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
 from app.schemas.product import ListingOut, PriceHistoryPoint, PriceHistoryResponse, ProductDetailOut
 
@@ -113,6 +114,15 @@ def get_product(
     scored_pairs = list(zip(visible, scores))
     scored_pairs.sort(key=_sort_key(sort))
 
+    retailers = {
+        row.id: (row.slug, row.display_name)
+        for row in db.execute(
+            select(RetailerSource.id, RetailerSource.slug, RetailerSource.display_name).where(
+                RetailerSource.id.in_({listing.retailer_source_id for listing in visible})
+            )
+        ).all()
+    }
+
     listings_out = [
         ListingOut(
             id=listing.id,
@@ -134,6 +144,11 @@ def get_product(
             reviews_count=listing.reviews_count,
             warranty_months=listing.warranty_months,
             warranty_type=listing.warranty_type,
+            retailer_slug=retailers.get(listing.retailer_source_id, (None, None))[0],
+            retailer_name=(
+                retailers.get(listing.retailer_source_id, (None, None))[1]
+                or retailers.get(listing.retailer_source_id, (None, None))[0]
+            ),
             score=score,
         )
         for listing, score in scored_pairs

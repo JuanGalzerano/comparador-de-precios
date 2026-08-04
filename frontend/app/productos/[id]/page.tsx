@@ -23,6 +23,7 @@ import type {
   SortKey,
 } from "@/lib/types";
 import { SaveButton } from "@/components/SaveButton";
+import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { ProductFilters } from "./ProductFilters";
 
 interface ProductPageProps {
@@ -171,18 +172,11 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
         </div>
 
         {best ? (
-          <div
-            style={{
-              marginTop: "var(--space-6)",
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) auto",
-              gap: "var(--space-8)",
-              alignItems: "end",
-            }}
-          >
+          <div className="best-offer">
             <div>
               <div style={{ fontSize: 15, lineHeight: 1.5 }}>
-                Conviene {best.seller_name ?? "un vendedor"} a {money(best.final_price)}
+                Conviene {best.retailer_name ?? best.seller_name ?? "un vendedor"} a{" "}
+                {money(best.final_price)}
                 {toNumber(best.final_price) === min
                   ? ", que además es la más barata."
                   : `, ${money(toNumber(best.final_price) - min)} más que la más barata.`}
@@ -216,6 +210,8 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
             Ninguna publicación pasa los filtros actuales. Probá sacando alguno.
           </p>
         )}
+
+        <PriceHistoryChart productId={product.id} />
       </section>
 
       <section style={{ marginTop: 56 }}>
@@ -250,25 +246,28 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
             No hay publicaciones que pasen estos filtros.
           </p>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Publicación</th>
-                <th style={{ width: 132 }}>Precio final</th>
-                <th style={{ width: 116 }}>Cuotas</th>
-                <th style={{ width: 136 }}>Vendedor</th>
-                <th style={{ width: 100 }}>Opiniones</th>
-                <th style={{ width: 104 }}>Garantía</th>
-                <th style={{ width: 52, textAlign: "right" }}>Score</th>
-                <th style={{ width: 104 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {listings.map((listing) => (
-                <ListingRow key={listing.id} listing={listing} mark={marks.get(listing.id)} />
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Publicación</th>
+                  <th style={{ width: 104 }}>Tienda</th>
+                  <th style={{ width: 132 }}>Precio final</th>
+                  <th style={{ width: 116 }}>Cuotas</th>
+                  <th style={{ width: 136 }}>Vendedor</th>
+                  <th style={{ width: 100 }}>Opiniones</th>
+                  <th style={{ width: 104 }}>Garantía</th>
+                  <th style={{ width: 52, textAlign: "right" }}>Score</th>
+                  <th style={{ width: 104 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {listings.map((listing) => (
+                  <ListingRow key={listing.id} listing={listing} mark={marks.get(listing.id)} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>
@@ -301,6 +300,9 @@ function ListingRow({ listing, mark }: { listing: Listing; mark: string | undefi
         <div className="text-muted" style={{ fontSize: 12, marginTop: 2 }}>
           {listing.title}
         </div>
+      </td>
+      <td>
+        <span className="retailer-badge">{listing.retailer_name ?? "—"}</span>
       </td>
       <td>
         <div className="num">{money(listing.final_price)}</div>

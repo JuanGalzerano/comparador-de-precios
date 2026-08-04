@@ -8,6 +8,8 @@ export interface ProductClusterCardData {
   model: string | null;
   category: string | null;
   listing_count: number;
+  retailer_count?: number;
+  retailer_names?: string[];
   min_final_price: string | null;
   max_final_price: string | null;
   best_score: number;
@@ -106,9 +108,17 @@ export function ProductClusterCard({ cluster }: { cluster: ProductClusterCardDat
         >
           {cluster.canonical_title}
         </div>
-        {(cluster.brand || cluster.model) && (
+        {(cluster.brand || cluster.model || cluster.retailer_names?.length) && (
           <div className="text-muted" style={{ fontSize: 12.5, marginTop: 3 }}>
             {[cluster.brand, cluster.model].filter(Boolean).join(" · ")}
+            {cluster.retailer_names?.length ? (
+              <>
+                {(cluster.brand || cluster.model) && " · "}
+                <span style={{ color: "var(--color-accent-300)" }}>
+                  {cluster.retailer_names.join(", ")}
+                </span>
+              </>
+            ) : null}
           </div>
         )}
 
@@ -134,6 +144,11 @@ export function ProductClusterCard({ cluster }: { cluster: ProductClusterCardDat
           <span className={scoreBadgeClass(cluster.best_score)}>
             {scoreLabel(cluster.best_score)}
           </span>
+          {(cluster.retailer_count ?? 0) > 1 && (
+            <span className="retailer-badge" title={cluster.retailer_names?.join(" · ")}>
+              {cluster.retailer_count} tiendas
+            </span>
+          )}
         </div>
 
         {/* Barra de ahorro */}

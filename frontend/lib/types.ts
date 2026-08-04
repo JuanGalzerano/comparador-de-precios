@@ -25,6 +25,9 @@ export interface ProductCluster {
   category: string | null;
   catalog_product_id: string | null;
   listing_count: number;
+  /** Tiendas distintas que publican este producto. */
+  retailer_count: number;
+  retailer_names: string[];
   /** Decimal como string, ej. "702000.00". */
   min_final_price: string;
   max_final_price: string;
@@ -68,6 +71,10 @@ export interface Listing {
 
   warranty_months: number | null;
   warranty_type: WarrantyType;
+
+  /** Tienda de la que salió este precio. */
+  retailer_slug: string | null;
+  retailer_name: string | null;
 
   score: number;
 }
@@ -130,4 +137,39 @@ export interface SavedProductsResponse {
  * el estado inicial de `SaveButton` sin pedir el detalle completo. */
 export interface SavedProductIdsResponse {
   product_ids: number[];
+}
+
+/** `SourceOut` — una fuente de datos en `GET /sources`. */
+export interface Source {
+  slug: string;
+  display_name: string | null;
+  kind: string;
+  status: string;
+  tos_risk_note: string | null;
+  listing_count: number;
+  product_count: number;
+  cheapest_count: number;
+  /** Fracción 0..1 de productos disputados donde esta tienda tiene el mejor precio. */
+  win_rate: number | null;
+  last_success_at: string | null;
+  last_error: string | null;
+}
+
+export interface SourcesResponse {
+  items: Source[];
+}
+
+/** `PriceHistoryPoint` — un punto crudo de `GET /products/{id}/price-history`. */
+export interface PriceHistoryPoint {
+  listing_id: number;
+  captured_at: string;
+  price: string;
+  shipping_cost: string | null;
+}
+
+/** `PriceHistoryResponse` — respuesta de `GET /products/{id}/price-history`. */
+export interface PriceHistoryResponse {
+  product_id: number;
+  since: string;
+  points: PriceHistoryPoint[];
 }

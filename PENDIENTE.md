@@ -1,7 +1,20 @@
 # Pendiente — todo lo que falta hacer en Cotejo
 
-Generado 2026-07-31. Orden: de lo más bloqueante a lo más futuro.
+Actualizado 2026-08-04. Orden: de lo más bloqueante a lo más futuro.
 Distingue entre lo que tenés que hacer **vos** y lo que puede hacer Claude.
+
+## Lo que ya NO está pendiente (se hizo el 2026-08-04)
+
+- ~~Cetrogar y Naldo no están en la base~~ → cargados, con datos reales.
+- ~~Gráfico de historial de precios~~ → hecho.
+- ~~Matching entre tiendas~~ → hecho (`app/matching/`), 32 productos comparados entre
+  2 y 3 tiendas.
+- ~~Página de transparencia~~ → `/como-funciona`, con datos en vivo.
+- ~~SEO / sitemap~~ → hecho (falta Open Graph con imagen).
+- ~~Responsive mobile~~ → verificado a 390px.
+
+**El único bloqueo real que queda es el token de MercadoLibre.** Todo lo demás ya
+funciona con Frávega, Cetrogar y Naldo.
 
 ---
 
@@ -36,20 +49,21 @@ Necesitás una cuenta en el portal de devs de ML y un token. Sin esto, el `Merca
 
 ---
 
-## 🔴 BLOQUEO 2 — Cetrogar y Naldo no están en la base de datos
+## ✅ Tiendas activas hoy (con datos reales en la base)
 
-Los adapters ya existen y funcionan. Falta que las tiendas tengan su fila en `retailer_source` para poder correr la ingesta.
+| Tienda | Cómo se obtiene | Publicaciones | Mejor precio en |
+|--------|-----------------|---------------|-----------------|
+| **Frávega** | API GraphQL propia (`/api/v2`) | 159 | 75% de los productos comparados |
+| **Cetrogar** | VTEX Intelligent Search | 141 | 45% |
+| **Naldo** | VTEX Intelligent Search | 126 | 30% |
 
-### Pasos (te pido que me digas "agregá Cetrogar y Naldo" — Claude lo hace)
+Para traer más productos:
 
-Claude inserta en `dev.db`:
-```sql
-INSERT INTO retailer_source (slug, display_name, kind, base_url, status)
-VALUES
-  ('cetrogar', 'Cetrogar', 'vtex', 'https://www.cetrogar.com.ar', 'active'),
-  ('naldo',    'Naldo',    'vtex', 'https://www.naldo.com.ar',    'active');
+```bash
+python -m app.workers.ingest cetrogar --term "smart tv 55" --max-results 24
 ```
-Y corre la ingesta. Podés simplemente decirme "agregá Cetrogar y Naldo" y lo hago yo.
+
+La ingesta corre el matcher sola al terminar (`--no-match` para saltearlo).
 
 ---
 
@@ -57,10 +71,11 @@ Y corre la ingesta. Podés simplemente decirme "agregá Cetrogar y Naldo" y lo h
 
 Estas cosas **no las hice todavía** porque esperaban que el MVP básico estuviera sólido. Decime cuál querés primero.
 
-### A. Gráfico de historial de precios en el frontend
-- Página de producto con línea de precio a lo largo del tiempo.
-- Necesita un chart (Recharts o Chart.js) y un fetch a `GET /products/{id}/price-history`.
-- **Lo hace Claude completo.**
+### A. ✅ Gráfico de historial de precios — HECHO (2026-08-04)
+- SVG propio en `frontend/components/PriceHistoryChart.tsx`, sin librerías nuevas.
+- Muestra el precio más bajo por día de los últimos 90 días.
+- **Para que tenga datos de verdad necesita ingestas repetidas en el tiempo** (hoy hay
+  1-2 días de historial). Eso lo resuelve el punto C.
 
 ### B. Alertas de bajada de precio
 - El usuario guardado pone un precio objetivo → el worker avisa cuando se alcanza.
@@ -73,25 +88,29 @@ Estas cosas **no las hice todavía** porque esperaban que el MVP básico estuvie
 - Necesitás contratar Redis (Upstash gratis sirve para empezar — ver `INFRAESTRUCTURA.md`).
 - Una vez que tenés el `REDIS_URL`, Claude arma el worker de Celery.
 
-### D. Matching entre tiendas (dedup de productos)
-- Hoy cada tienda tiene sus propias filas en `product`. Para mostrar "mismo producto en 3 tiendas" necesitás el matcher (fuzzy + embeddings).
-- **Lo hace Claude** una vez que haya datos de ≥2 tiendas.
+### D. ✅ Matching entre tiendas — HECHO (2026-08-04)
+- `app/matching/` agrupa el mismo producto de distintas tiendas. 32 clusters
+  multi-tienda hoy.
+- Lo que falta: la vía de embeddings para categorías donde el título no trae código de
+  modelo (ropa, muebles, genéricos). Con electro/tecnología el matcher actual alcanza.
 
 ### E. Panel de administración
-- Ver salud de las fuentes, disparar ingestas, revisar matches dudosos.
+- Ver salud de las fuentes (ya hay datos: `GET /sources`), disparar ingestas, revisar
+  matches dudosos (ya se acumulan en `product_match` con su confianza).
 - **Lo hace Claude.**
 
-### F. Página de transparencia / "cómo funciona"
-- Por buenas prácticas y para AdSense, conviene tener un `/como-funciona` que explique qué es Cotejo y de dónde salen los datos.
-- **Lo hace Claude.**
+### F. ✅ Página de transparencia — HECHA: `/como-funciona`
 
-### G. SEO / Open Graph / sitemap
-- `<meta>` tags, `sitemap.xml`, `robots.txt`.
-- **Lo hace Claude.**
+### G. SEO / sitemap — hecho salvo la imagen de Open Graph
+- Falta una imagen `og:image` (necesita una decisión de diseño tuya o una imagen).
 
-### H. Responsive mobile
-- El frontend funciona en desktop. Hay que revisar que todo se vea bien en celular.
-- **Lo hace Claude** (requiere que puedas abrir el preview en un celular o DevTools).
+### H. ✅ Responsive mobile — verificado a 390px y 1600×600
+
+### I. Categorías / navegación por rubro
+- Los productos creados por el matcher no tienen `category`, así que no hay forma de
+  navegar "todos los celulares". Se puede inferir de los títulos o del breadcrumb que
+  devuelve cada tienda.
+- **Lo hace Claude.**
 
 ---
 
@@ -177,9 +196,9 @@ Nada de esto es necesario para desarrollo local. Lo hacés cuando quieras subir 
 |----------|-------|-------|
 | 🔴 Ahora | Crear app ML en devs portal y conseguir access_token | **Vos** |
 | 🔴 Ahora | Avisar a Claude para wrapear el token en el adapter | Claude |
-| 🔴 Ahora | Agregar Cetrogar y Naldo a la DB | Claude (cuando vos lo pedís) |
-| 🟡 Pronto | Elegir cuál feature construir primero (historial, matching, alertas) | **Vos** |
-| 🟡 Pronto | Esperar que Musimundo vuelva de mantenimiento | Esperar |
+| 🟡 Pronto | Contratar Redis (Upstash gratis) para que la ingesta corra sola — sin eso el historial de precios no se llena | **Vos** |
+| 🟡 Pronto | Elegir el canal de las alertas de precio (email / push / panel) | **Vos** |
+| 🟡 Pronto | Categorías por producto + panel de admin | Claude |
 | 🔵 Cuando quieras lanzar | Contratar Neon + Railway + Vercel + dominio | **Vos** |
 | 🔵 Cuando quieras lanzar | Pedir a Claude que conecte todo | Claude |
 | 🔵 Post-lanzamiento | Aplicar a AdSense | **Vos** |

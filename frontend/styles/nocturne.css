@@ -476,3 +476,110 @@ textarea.input { min-height: 90px; resize: vertical; }
   font-size: 12px;
   color: color-mix(in srgb, var(--color-text) 42%, transparent);
 }
+
+/* ── Bloque "conviene X" de la ficha de producto ─────────────────────── */
+.best-offer {
+  margin-top: var(--space-6);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-8);
+  align-items: end;
+}
+@media (max-width: 700px) {
+  .best-offer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: stretch;
+  }
+  .best-offer .btn {
+    justify-self: start;
+  }
+}
+
+/* ── Retailer badge ──────────────────────────────────────────────────── */
+.retailer-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  letter-spacing: 0.02em;
+  color: var(--color-accent-300);
+  background: rgba(145, 132, 217, 0.10);
+  border: 1px solid rgba(145, 132, 217, 0.22);
+}
+
+/* ── Table scroll wrapper ────────────────────────────────────────────── */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* `main` es un flex item del layout: sin `min-width: 0` su ancho mínimo es el
+   min-content de la tabla, así que la página entera se ensancha en vez de que
+   scrollee `.table-scroll`. */
+main {
+  min-width: 0;
+  width: 100%;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Responsive — mobile / tablet
+   ══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+  .site-header-inner {
+    flex-wrap: wrap;
+    padding-block: 10px !important;
+  }
+  .site-search-form {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none !important;
+  }
+
+  .hero-section h1 {
+    font-size: 36px !important;
+  }
+
+  .cluster-card {
+    flex-wrap: wrap;
+    gap: var(--space-4) !important;
+  }
+  .cluster-card > div:last-child {
+    text-align: left !important;
+    min-width: 0 !important;
+    flex-basis: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  /* Columnas: 1 Publicación · 2 Tienda · 3 Precio · 4 Cuotas · 5 Vendedor ·
+     6 Opiniones · 7 Garantía · 8 Score · 9 link. En pantallas chicas se cae
+     primero lo que menos decide la compra. */
+  .table th:nth-child(5),
+  .table td:nth-child(5),
+  .table th:nth-child(6),
+  .table td:nth-child(6) {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero-section h1 {
+    font-size: 28px !important;
+  }
+  .product-avatar {
+    width: 52px !important;
+    height: 52px !important;
+    font-size: 20px !important;
+  }
+
+  .table th:nth-child(4),
+  .table td:nth-child(4),
+  .table th:nth-child(7),
+  .table td:nth-child(7) {
+    display: none;
+  }
+}

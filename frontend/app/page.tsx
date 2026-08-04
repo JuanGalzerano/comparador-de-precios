@@ -1,10 +1,10 @@
+import Link from "next/link";
 import { API_URL } from "@/lib/config";
 import { fetchJson } from "@/lib/fetch-result";
-import { toNumber } from "@/lib/format";
-import type { ProductCluster, SearchResponse } from "@/lib/types";
+import type { ProductCluster, SearchResponse, SourcesResponse } from "@/lib/types";
 import { ProductClusterCard } from "@/components/ProductClusterCard";
 import { SearchInput } from "@/components/SearchInput";
-import { parseMlUrl } from "@/lib/ml-url";
+import { parseProductUrl } from "@/lib/ml-url";
 
 interface HomePageProps {
   searchParams: Promise<{ q?: string }>;
@@ -21,8 +21,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const { q } = await searchParams;
   const query = q?.trim() ?? "";
 
-  const mlInfo = query ? parseMlUrl(query) : null;
-  const effectiveQuery = mlInfo ? mlInfo.terms : query;
+  const linkInfo = query ? parseProductUrl(query) : null;
+  const effectiveQuery = linkInfo ? linkInfo.terms : query;
 
   return (
     <main
@@ -39,9 +39,62 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <DiscoverySections />
         </>
       ) : (
-        <SearchResults query={effectiveQuery} />
+        <>
+          {linkInfo && <ProductUrlBanner query={effectiveQuery} link={linkInfo} />}
+          <SearchResults query={effectiveQuery} />
+        </>
       )}
     </main>
+  );
+}
+
+/**
+ * Banner que aparece cuando el usuario pegó el link de un producto (de
+ * cualquier tienda) en vez de escribir texto. Deja explícito que Cotejo no
+ * solo trae ese link de vuelta: busca el mismo producto en todas las fuentes
+ * activas para comparar precios entre tiendas.
+ */
+function ProductUrlBanner({
+  query,
+  link,
+}: {
+  query: string;
+  link: { originalUrl: string; source: string };
+}) {
+  return (
+    <div
+      className="card"
+      style={{
+        marginBottom: "var(--space-6)",
+        padding: "var(--space-4) var(--space-5)",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-4)",
+        flexWrap: "wrap",
+        border: "1px solid rgba(145,132,217,0.22)",
+        background: "rgba(145,132,217,0.06)",
+      }}
+    >
+      <div>
+        <div className="card-title" style={{ fontSize: 14 }}>
+          Buscamos el mejor precio para &ldquo;{query}&rdquo; en todas las fuentes
+        </div>
+        <p className="card-body" style={{ marginTop: 2 }}>
+          Detectamos un link de {link.source}. Comparamos ese mismo producto contra el resto de
+          las tiendas activas antes de decirte dónde conviene.
+        </p>
+      </div>
+      <a
+        href={link.originalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="btn btn-secondary"
+        style={{ whiteSpace: "nowrap" }}
+      >
+        Ver publicación original →
+      </a>
+    </div>
   );
 }
 
@@ -117,57 +170,129 @@ function Hero() {
   );
 }
 
-/**
- * Dos secciones de descubrimiento bajo el hero, ambas alimentadas por el
- * mismo `GET /search` sin `q` (que ya devuelve TODOS los productos ordenados
- * por precio final mínimo ascendente, paginado): un solo fetch, dos vistas.
- */
+/** Secciones de descubrimiento bajo el hero. */
 async function DiscoverySections() {
-  const url = `${API_URL}/search?${new URLSearchParams({ page_size: "8" })}`;
-  const result = await fetchJson<SearchResponse>(url);
+  // Dos criterios distintos, dos consultas: el backend ordena por cantidad de
+  // tiendas comparadas y por diferencia de precio dentro del cluster
+  // (`GET /search?sort=`), así la home no queda ordenada por "lo más barato del
+  // catálogo", que no dice nada sobre dónde conviene comparar.
+  const [comparados, oportunidades] = await Promise.all([
+    fetchJson<SearchResponse>(
+      `${API_URL}/search?${new URLSearchParams({
+        page_size: "6",
+        sort: "retailers",
+        min_retailers: "2",
+      })}`,
+    ),
+    fetchJson<SearchResponse>(
+      `${API_URL}/search?${new URLSearchParams({
+        page_size: "6",
+        sort: "spread",
+        min_retailers: "2",
+      })}`,
+    ),
+  ]);
 
-  if (!result.ok || result.data.items.length === 0) {
+  if (!comparados.ok || comparados.data.items.length === 0) {
     // Sin productos (o backend caido): las secciones simplemente no se
     // muestran, el error ya se explica en el flujo de busqueda si el
     // usuario intenta buscar algo.
     return null;
   }
 
-  const { items } = result.data;
-
-  // Heurística TEMPORAL de "oportunidad" mientras no haya historial de
-  // precios poblado para un /ofertas real (mediana de 90 días, etc.): mayor
-  // spread entre la publicación más cara y la más barata del mismo cluster
-  // sugiere más margen para comparar y ahorrar eligiendo bien. No es una
-  // "oferta" real (no hay baseline temporal detrás), por eso el nombre en
-  // la UI es "Mejores oportunidades" y no "Ofertas".
-  const bySpread = [...items].sort(
-    (a, b) => spread(b) - spread(a),
-  );
-
   return (
     <>
-      <ClusterSection title="Productos relevantes" items={items} />
-      <ClusterSection title="Mejores oportunidades" items={bySpread} />
+      <ClusterSection
+        title="Comparados en varias tiendas"
+        subtitle="mismo producto, distintos precios"
+        items={comparados.data.items}
+      />
+      {oportunidades.ok && oportunidades.data.items.length > 0 && (
+        <ClusterSection
+          title="Donde más se ahorra eligiendo bien"
+          subtitle="mayor diferencia entre la publicación más cara y la más barata"
+          items={oportunidades.data.items}
+        />
+      )}
+      <BestPriceStores />
     </>
   );
 }
 
-function spread(cluster: ProductCluster): number {
-  return toNumber(cluster.max_final_price) - toNumber(cluster.min_final_price);
+/**
+ * Ranking de tiendas por competitividad real (`GET /sources`): en qué fracción de los
+ * productos donde compite contra otra tienda tiene el precio más bajo. Sale de los
+ * datos propios, no de una lista curada a mano.
+ */
+async function BestPriceStores() {
+  const result = await fetchJson<SourcesResponse>(`${API_URL}/sources`);
+  if (!result.ok) return null;
+
+  const ranked = result.data.items.filter((s) => s.win_rate !== null && s.listing_count > 0);
+  if (ranked.length < 2) return null;
+
+  return (
+    <section style={{ marginTop: 56 }}>
+      <div className="section-header">
+        <h2 className="section-title">Tiendas que más seguido tienen el mejor precio</h2>
+        <span className="section-count">sobre productos comparados</span>
+      </div>
+
+      <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+        {ranked.map((source) => {
+          const pct = Math.round((source.win_rate ?? 0) * 100);
+          return (
+            <div
+              key={source.slug}
+              className="card"
+              style={{ padding: "var(--space-4)", minWidth: 200, flex: "1 1 200px" }}
+            >
+              <div className="card-title" style={{ fontSize: 15 }}>
+                {source.display_name ?? source.slug}
+              </div>
+              <div
+                className="num"
+                style={{ fontSize: 26, letterSpacing: "-0.03em", color: "var(--color-accent)" }}
+              >
+                {pct}%
+              </div>
+              <div className="savings-bar" style={{ marginTop: 0 }}>
+                <div className="savings-bar-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="text-muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                mejor precio en {source.cheapest_count} de los productos donde compite
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-muted" style={{ fontSize: 12, marginTop: "var(--space-3)" }}>
+        Ninguna tienda paga por aparecer acá — el orden sale de comparar sus precios.{" "}
+        <Link href="/como-funciona">Cómo se calcula</Link>
+      </p>
+    </section>
+  );
 }
 
 function ClusterSection({
   title,
+  subtitle,
   items,
 }: {
   title: string;
+  subtitle?: string;
   items: ProductCluster[];
 }) {
   return (
     <section style={{ marginTop: 56 }}>
       <div className="section-header">
         <h2 className="section-title">{title}</h2>
+        {subtitle && (
+          <span className="text-muted" style={{ fontSize: 12 }}>
+            {subtitle}
+          </span>
+        )}
         <span className="section-count">{items.length} productos</span>
       </div>
 

@@ -43,6 +43,7 @@ from app.adapters.types import (
     SearchQuery,
 )
 from app.enums import SourceStatus
+from app.matching.matcher import match_listings
 from app.models.listing import Listing
 from app.models.price_history import PriceHistory
 from app.models.retailer_source import RetailerSource
@@ -329,15 +330,26 @@ def main(argv: list[str] | None = None) -> int:
             "(alimenta price_history) en vez de buscar un termino nuevo"
         ),
     )
+    parser.add_argument(
+        "--no-match",
+        action="store_true",
+        help=(
+            "No correr el matcher al terminar. Por defecto la ingesta agrupa las "
+            "publicaciones nuevas en productos (`python -m app.workers.match`)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO)
 
+    match_stats = None
     db = SessionLocal()
     try:
         source = _load_source(db, args.source_slug)
         request = _build_cli_request(db, source, args)
         result = run_ingest(db, source, request)
+        if not args.no_match:
+            match_stats = match_listings(db)
     except SourceNotConfigured as exc:
         print(f"error: {exc}")
         return 1
@@ -352,6 +364,8 @@ def main(argv: list[str] | None = None) -> int:
         f"actualizados={result.updated} price_history_nuevos={result.price_points_added} "
         f"errores_de_item={len(result.item_errors)}"
     )
+    if match_stats is not None:
+        print(f"matching: {match_stats}")
     for message in result.item_errors:
         print(f"  - {message}")
     return 0 if not result.item_errors else 2

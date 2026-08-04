@@ -17,10 +17,15 @@ Plan completo de arquitectura y roadmap: `C:\Users\juani\.claude\plans\ahora-hac
 
 | Fuente | Estado | Cómo se obtiene |
 | --- | --- | --- |
-| **MercadoLibre** | ✅ Activa (única fuente en funcionamiento hoy) | API pública oficial y sin autenticación (`api.mercadolibre.com`). No hay scraping acá: es un canal sancionado por la propia plataforma. |
+| **Frávega** | ✅ Activa | API GraphQL pública del propio sitio (`/api/v2`). |
+| **Cetrogar** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
+| **Naldo** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
+| **MercadoLibre** | ⏸ Pausada | La API pública pasó a exigir OAuth: hace falta registrar una app en el portal de desarrolladores (ver `MERCADOLIBRE_API.md`). El adapter está escrito y testeado. |
 | **Precios Claros / SEPA** (dato oficial del gobierno argentino) | ⏳ Evaluando viabilidad | El Estado obliga a grandes cadenas a publicar precios en archivos diarios. Falta confirmar si las cadenas de electro/tecnología realmente reportan ahí antes de construir el importer. |
-| **Frávega, Cetrogar** (corren sobre la plataforma VTEX) | ⏳ Pendiente de aprobación | Existe un endpoint de catálogo técnicamente accesible pero no autorizado oficialmente para este uso — se evalúa caso por caso el riesgo antes de activarlo. |
-| **Musimundo, Garbarino, Compumundo y otras** | ❌ No integradas todavía | No tienen API pública. Si en algún momento se suman, va a ser con scraping propio (servidor propio, nunca con la computadora del visitante — ver más abajo) y con aprobación explícita retailer por retailer. |
+| **Musimundo, Garbarino, Compumundo y otras** | ❌ No integradas todavía | No tienen API pública accesible. Si en algún momento se suman, va a ser con scraping propio (servidor propio, nunca con la computadora del visitante — ver más abajo) y con aprobación explícita retailer por retailer. |
+
+El estado y la competitividad de cada fuente se sirven en vivo en `GET /sources` y se
+muestran en `/como-funciona`.
 
 Cada fuente queda registrada con su estado (activa / experimental / bloqueada por revisión
 de términos de servicio) — nada se activa en silencio.
@@ -48,10 +53,29 @@ actual. Todo el scraping, si se hace, corre en servidores propios.
 - **Gratuito, sin letra chica.** Se sostiene con publicidad (Google AdSense); el botón de
   compra siempre lleva a la publicación original de la tienda, nunca a un checkout propio.
 
-## Estado actual (MVP en construcción)
+## Estado actual (MVP funcionando en local)
 
-- ✅ Modelo de datos (Postgres) y arquitectura de adapters por fuente.
-- ✅ Adapter de MercadoLibre + score portado y testeado.
-- ✅ Endpoints `/search` y `/products` funcionando contra datos locales.
-- ⏳ Frontend real (Next.js) — todavía usando el prototipo estático de `project/`.
-- ⏳ Historial de precios, alertas, panel de administración, resto de las fuentes.
+- ✅ Modelo de datos (Postgres/SQLite) y arquitectura de adapters por fuente.
+- ✅ Adapters de Frávega, Cetrogar, Naldo y MercadoLibre, con score testeado.
+- ✅ Ingesta con datos reales: ~335 publicaciones de 3 tiendas.
+- ✅ Matcher cross-retailer: el mismo producto de distintas tiendas cae en un solo cluster.
+- ✅ Frontend Next.js: búsqueda, ficha comparativa, historial de precios, favoritos,
+  cuenta de usuario, `/como-funciona`.
+- ✅ 111 tests.
+- ⏳ Ingesta programada (Celery/Redis), alertas de precio, panel de administración,
+  categorías, despliegue.
+
+Detalle completo en `ESTADO.md`; lo que falta y quién lo hace, en `PENDIENTE.md`.
+
+## Cómo correrlo en local
+
+```bash
+cd backend && .venv/Scripts/python -m uvicorn app.main:app --port 8000 --reload
+cd frontend && npm run dev
+```
+
+Traer productos nuevos de una tienda (corre el matcher al terminar):
+
+```bash
+cd backend && .venv/Scripts/python -m app.workers.ingest fravega --term "smart tv 55" --max-results 24
+```

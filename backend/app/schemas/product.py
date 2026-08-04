@@ -46,6 +46,11 @@ class ListingOut(BaseModel):
     warranty_months: int | None
     warranty_type: WarrantyType
 
+    #: De qué tienda salió este precio. Sin esto la tabla comparativa no se puede leer:
+    #: el usuario ve cinco precios distintos sin saber a qué sitio pertenece cada uno.
+    retailer_slug: str | None = None
+    retailer_name: str | None = None
+
     #: `scoreOf()` calculado server-side contra el set filtrado (0-100).
     score: int
 

@@ -31,6 +31,12 @@ class ProductClusterOut(BaseModel):
     catalog_product_id: str | None
 
     listing_count: int
+    #: Tiendas distintas que publican este producto. Es el dato que justifica el
+    #: producto entero ("lo comparamos en 3 tiendas"), distinto de `listing_count`
+    #: (una misma tienda puede tener varias publicaciones del mismo producto).
+    retailer_count: int = 1
+    #: Nombres de esas tiendas, para mostrarlas en la tarjeta sin un fetch extra.
+    retailer_names: list[str] = []
     min_final_price: Decimal
     max_final_price: Decimal
     #: Mejor `score_of()` del set filtrado (0-100).

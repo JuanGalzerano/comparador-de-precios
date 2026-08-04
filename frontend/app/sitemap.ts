@@ -8,6 +8,7 @@ const BASE = "https://cotejo.ar";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const static_pages: MetadataRoute.Sitemap = [
     { url: BASE, changeFrequency: "daily", priority: 1 },
+    { url: `${BASE}/como-funciona`, changeFrequency: "monthly", priority: 0.5 },
     { url: `${BASE}/ingresar`, changeFrequency: "monthly", priority: 0.3 },
   ];
 

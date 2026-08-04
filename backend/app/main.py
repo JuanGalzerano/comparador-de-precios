@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routers import auth, favorites, health, products, search
+from app.api.routers import auth, favorites, health, products, search, sources
 from app.config import settings
 
 
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(products.router)
     app.include_router(auth.router)
     app.include_router(favorites.router)
+    app.include_router(sources.router)
 
     # TODO: montar aca los routers que faltan a medida que se implementen:
     #   - /ofertas (precio actual vs. mediana de 90 dias, sobre `price_history`)
