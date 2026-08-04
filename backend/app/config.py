@@ -7,11 +7,12 @@ toque la base.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -28,11 +29,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # --- Base de datos -----------------------------------------------------
-    # Sin default productivo a proposito: si falta la env var, la app falla al arrancar
-    # en vez de escribir silenciosamente en una base equivocada.
+    # El default es la SQLite de desarrollo, NO una URL de Postgres: si el deploy se
+    # olvida de inyectar `DATABASE_URL`, el error tiene que ser obvio ("está usando
+    # SQLite") y no una app que arranca apuntando a un `localhost:5432` que puede llegar
+    # a existir y ser la base equivocada. `check_database_url_for_env` avisa al arrancar.
     database_url: str = Field(
-        default="postgresql+psycopg2://cotejo:cotejo@localhost:5432/cotejo",
-        description="URL SQLAlchemy de Postgres.",
+        default="sqlite+pysqlite:///./dev.db",
+        description="URL SQLAlchemy de la base. En produccion, Postgres.",
     )
     sql_echo: bool = False
     db_pool_size: int = 5
@@ -44,13 +47,21 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # --- Frontend ----------------------------------------------------------
-    cors_origins: list[str] = ["http://localhost:3000"]
+    #: `NoDecode` es necesario: sin eso pydantic-settings intenta JSON-decodear el valor
+    #: de entorno ANTES de correr el validator, así que `CORS_ORIGINS=http://a,http://b`
+    #: reventaba con `SettingsError` y el validator de abajo era código muerto. Con
+    #: `NoDecode` el string llega crudo y se acepta tanto CSV como JSON.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
+        """Acepta `http://a,http://b` (CSV) y `["http://a","http://b"]` (JSON)."""
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            raw = value.strip()
+            if raw.startswith("["):
+                return json.loads(raw)
+            return [item.strip() for item in raw.split(",") if item.strip()]
         return value
 
     # --- Cuentas de usuario / sesion -----------------------------------------
@@ -68,6 +79,15 @@ class Settings(BaseSettings):
     # Client Credentials flow. Ver MERCADOLIBRE_API.md para obtener el token.
     # Sin token: el MercadoLibreAdapter devuelve 403 en todos los endpoints.
     ml_access_token: str | None = None
+    #: Solo se usan si algun dia se implementa la auto-renovacion del token
+    #: (MERCADOLIBRE_API.md §3d). Declarados aca para que ese helper no reviente con
+    #: `AttributeError` al leerlos.
+    ml_client_id: str | None = None
+    ml_client_secret: str | None = None
+
+    @property
+    def uses_sqlite(self) -> bool:
+        return self.database_url.startswith("sqlite")
 
     @property
     def is_local(self) -> bool:
@@ -92,3 +112,21 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def check_database_url_for_env() -> str | None:
+    """Devuelve un warning si la config de base no tiene sentido para el entorno.
+
+    El caso que importa: desplegar a produccion sin inyectar `DATABASE_URL`. Antes eso
+    arrancaba contra un Postgres `localhost` inventado; ahora arranca contra SQLite, que
+    parece funcionar hasta que el contenedor se reinicia y se pierde todo. Un warning
+    explicito al arrancar es la diferencia entre verlo en el primer log y descubrirlo
+    una semana despues.
+    """
+    if settings.uses_sqlite and not settings.is_local:
+        return (
+            f"COTEJO_ENV={settings.cotejo_env!r} pero DATABASE_URL apunta a SQLite "
+            f"({settings.database_url!r}). Los datos se pierden cuando se reinicia el "
+            "proceso: definí DATABASE_URL con la URL de Postgres."
+        )
+    return None

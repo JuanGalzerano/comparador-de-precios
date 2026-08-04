@@ -36,6 +36,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import ColumnElement, func, or_, select
 
 from app.api.deps import DbSession
+from app.config import settings
 from app.enums import ItemCondition
 from app.models.listing import Listing
 from app.models.product import Product
@@ -68,37 +69,53 @@ def _ml_score(item: dict) -> int:
 
 
 def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
+    """Complemento en vivo desde la API de ML. Nunca propaga errores.
+
+    TODO el cuerpo va adentro del `try`, incluido el parseo: la API puede responder
+    200 con HTML (pagina de mantenimiento o challenge de un WAF), y ahi `resp.json()`
+    levanta `JSONDecodeError`. Con el parseo afuera del `try` eso era un 500 en `/search`,
+    que es la home del sitio — justo el caso que este bloque decia degradar.
+    """
+    headers = {"Accept": "application/json"}
+    # La API de ML pasó a exigir OAuth: sin token responde 403 y esta funcion devuelve
+    # vacio. Ver MERCADOLIBRE_API.md.
+    if settings.ml_access_token:
+        headers["Authorization"] = f"Bearer {settings.ml_access_token}"
+
     try:
         with httpx.Client(timeout=_ML_TIMEOUT) as client:
             resp = client.get(
                 _ML_SEARCH_URL,
                 params={"q": query, "limit": min(limit, 50), "sort": "relevance"},
+                headers=headers,
             )
             resp.raise_for_status()
+
+        results: list[ProductClusterOut] = []
+        for i, item in enumerate(resp.json().get("results", [])[:limit]):
+            price = Decimal(str(item.get("price") or 0))
+            attrs = {a["id"]: a.get("value_name") for a in (item.get("attributes") or [])}
+            results.append(
+                ProductClusterOut(
+                    id=-(i + 1),
+                    canonical_title=item.get("title", ""),
+                    brand=attrs.get("BRAND"),
+                    model=attrs.get("MODEL"),
+                    category=None,
+                    catalog_product_id=item.get("catalog_product_id"),
+                    listing_count=1,
+                    retailer_count=1,
+                    retailer_names=["MercadoLibre"],
+                    min_final_price=price,
+                    max_final_price=price,
+                    best_score=_ml_score(item),
+                    permalink=item.get("permalink"),
+                )
+            )
+        return results
     except Exception as exc:
         logger.warning("ML live search failed for %r: %s", query, exc)
         return []
-
-    results: list[ProductClusterOut] = []
-    for i, item in enumerate(resp.json().get("results", [])[:limit]):
-        price = Decimal(str(item.get("price") or 0))
-        attrs = {a["id"]: a.get("value_name") for a in (item.get("attributes") or [])}
-        results.append(
-            ProductClusterOut(
-                id=-(i + 1),
-                canonical_title=item.get("title", ""),
-                brand=attrs.get("BRAND"),
-                model=attrs.get("MODEL"),
-                category=None,
-                catalog_product_id=item.get("catalog_product_id"),
-                listing_count=1,
-                min_final_price=price,
-                max_final_price=price,
-                best_score=_ml_score(item),
-                permalink=item.get("permalink"),
-            )
-        )
-    return results
 
 
 SearchSort = Literal["price", "retailers", "spread"]
@@ -143,13 +160,16 @@ def _build_filters(
     if category:
         filters.append(func.lower(Product.category) == category.strip().lower())
     if q and q.strip():
-        like = f"%{q.strip()}%"
+        # `%` y `_` del usuario son comodines de LIKE: sin escaparlos, buscar "50%"
+        # matchea cualquier cosa que empiece con 50 y "a_b" matchea "axb".
+        escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
         filters.append(
             or_(
-                Product.canonical_title.ilike(like),
-                Product.brand.ilike(like),
-                Product.model.ilike(like),
-                Listing.title.ilike(like),
+                Product.canonical_title.ilike(like, escape="\\"),
+                Product.brand.ilike(like, escape="\\"),
+                Product.model.ilike(like, escape="\\"),
+                Listing.title.ilike(like, escape="\\"),
             )
         )
     return filters
@@ -208,7 +228,10 @@ def search(
     agg_rows = db.execute(page_stmt).all()
 
     if not agg_rows:
-        ml_items = _ml_live_search(q.strip(), page_size) if q and q.strip() else []
+        # Solo en la primera pagina: la busqueda live de ML no sabe paginar (no se le
+        # pasa offset), asi que pedirla de nuevo en la pagina 2 devolvia LOS MISMOS
+        # resultados y la paginacion no terminaba nunca.
+        ml_items = _ml_live_search(q.strip(), page_size) if q and q.strip() and page == 1 else []
         return SearchResponse(items=ml_items, page=page, page_size=page_size, total=len(ml_items))
 
     product_ids = [row.product_id for row in agg_rows]
@@ -264,8 +287,8 @@ def search(
             )
         )
 
-    # Complementar con ML live si la DB no llena la página
-    if q and q.strip() and len(items) < page_size:
+    # Complementar con ML live si la DB no llena la página (solo la primera: ver arriba)
+    if q and q.strip() and page == 1 and len(items) < page_size:
         ml_items = _ml_live_search(q.strip(), page_size - len(items))
         items.extend(ml_items)
         total += len(ml_items)

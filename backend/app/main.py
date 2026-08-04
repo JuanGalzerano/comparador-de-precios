@@ -8,12 +8,19 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import logging
+
 from app import __version__
 from app.api.routers import auth, favorites, health, products, search, sources
-from app.config import settings
+from app.config import check_database_url_for_env, settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    if warning := check_database_url_for_env():
+        logger.warning("CONFIGURACION: %s", warning)
+
     app = FastAPI(
         title=settings.app_name,
         version=__version__,

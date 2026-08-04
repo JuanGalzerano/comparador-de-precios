@@ -62,6 +62,12 @@ class Listing(IdMixin, TimestampMixin, Base):
     #: Junto a `retailer_source_id` forma la clave natural de upsert de la ingesta.
     external_id: Mapped[str] = mapped_column(String(128), nullable=False)
 
+    #: Id del producto en el catalogo de la fuente (`catalog_product_id` de ML). Cuando
+    #: existe es la señal de matching mas fuerte que hay: dos publicaciones con el mismo
+    #: valor son el mismo producto, sin heuristica de por medio. NULL en las fuentes que
+    #: no tienen concepto de catalogo compartido (VTEX).
+    catalog_product_id: Mapped[str | None] = mapped_column(String(64))
+
     # --- Vendedor ----------------------------------------------------------
     seller_name: Mapped[str | None] = mapped_column(String(256))
     #: String y no int: ML usa ids numericos, VTEX/scrapers usan slugs.
@@ -157,6 +163,16 @@ class Listing(IdMixin, TimestampMixin, Base):
         Index("ix_listing_product_id_final_price", "product_id", "final_price"),
         # Salud/frescura por fuente y barridos de re-ingesta ("lo mas viejo primero").
         Index("ix_listing_retailer_source_id_fetched_at", "retailer_source_id", "fetched_at"),
+        # Via deterministica del matcher: "todas las publicaciones de este catalog id".
+        Index("ix_listing_catalog_product_id", "catalog_product_id"),
+        # `/sources`: agregado por (producto, fuente) con min(final_price). El indice de
+        # arriba no lo cubre (le falta la fuente) y forzaba un scan de toda la tabla.
+        Index(
+            "ix_listing_product_retailer_price",
+            "product_id",
+            "retailer_source_id",
+            "final_price",
+        ),
         CheckConstraint("price >= 0", name="price_non_negative"),
         CheckConstraint(
             "shipping_cost IS NULL OR shipping_cost >= 0", name="shipping_cost_non_negative"

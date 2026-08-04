@@ -3,10 +3,11 @@ import Link from "next/link";
 import { HeaderAuth } from "@/components/HeaderAuth";
 import { SearchInput } from "@/components/SearchInput";
 import { Footer } from "@/components/Footer";
+import { SITE_URL } from "@/lib/config";
 import "../styles/nocturne.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://cotejo.ar"),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Cotejo — Comparador de precios Argentina",
     template: "%s | Cotejo",

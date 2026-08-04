@@ -19,11 +19,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.enums import MatchMethod
 from app.matching.normalize import (
+    extract_generation_numbers,
     extract_brand,
     extract_capacity_gb,
     extract_color,
@@ -78,6 +79,7 @@ class _Fingerprint:
     capacity_gb: int | None
     variants: frozenset[str]
     model_codes: frozenset[str]
+    generations: frozenset[str]
 
 
 @dataclass
@@ -93,6 +95,7 @@ def fingerprint(title: str, *, brand: str | None = None, capacity_gb: int | None
         capacity_gb=capacity_gb if capacity_gb is not None else extract_capacity_gb(title),
         variants=extract_variants(title),
         model_codes=extract_model_codes(title),
+        generations=extract_generation_numbers(title),
     )
 
 
@@ -105,10 +108,44 @@ def _conflicts(a: _Fingerprint, b: _Fingerprint) -> bool:
     # "iPhone 13" vs "iPhone 13 Pro Max": mismos tokens casi todos, producto distinto.
     if a.variants != b.variants:
         return True
-    # Dos códigos de fabricante distintos son dos productos distintos, punto.
-    if a.model_codes and b.model_codes and not (a.model_codes & b.model_codes):
+    # "iPhone 13" vs "iPhone 14": el número de generación es lo ÚNICO que los separa
+    # (Jaccard 0.5, por encima del umbral). Sin esta guarda el cluster del iPhone 13
+    # se comía al 14 y al 15 y la comparación de precios quedaba mintiendo.
+    #
+    # La condición es que CADA lado tenga un número que el otro no tiene, no que la
+    # intersección sea vacía: "iPhone 15 Pro Max 256 GB 8" y "iPhone 16 Pro Max 256 GB 8"
+    # comparten el 8 y con la regla de intersección se fusionaban igual. Al mismo tiempo,
+    # que un título traiga números de más ("Ryzen 3 15,6") no puede descartar el match si
+    # el otro es un subconjunto.
+    if (a.generations - b.generations) and (b.generations - a.generations):
+        return True
+    # Códigos de fabricante disjuntos = dos productos distintos... salvo que una de las
+    # dos tiendas haya publicado ADEMAS el código del chip ("7520u") y la otra no: ahí
+    # los sets son disjuntos sin que los productos lo sean. Por eso el conflicto exige
+    # que ninguno de los códigos de un lado aparezca dentro de un código del otro.
+    if a.model_codes and b.model_codes and not _codes_overlap(a.model_codes, b.model_codes):
         return True
     return False
+
+
+def _codes_overlap(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Hay un código en común, exacto o por contención (`15fc0235la` ⊃ `fc0235la`)."""
+    if a & b:
+        return True
+    return any(x in y or y in x for x in a for y in b)
+
+
+def _shares_model_code(a: _Fingerprint, b: _Fingerprint) -> bool:
+    """Ambos títulos traen el mismo código de fabricante.
+
+    Es la señal más fuerte que existe sin id de catálogo, y por sí sola alcanza para
+    agrupar: dos tiendas que escriben `UN50U8000F` están hablando del mismo televisor
+    aunque el resto del título no se parezca en nada. Antes esto solo servía para
+    DESCARTAR, así que "Smart TV Samsung UN50U8000F 50 pulgadas 4K" y
+    'Samsung Smart TV 50" UN50U8000F UHD' quedaban en clusters separados (Jaccard 0.33,
+    debajo del umbral) — dos productos de una tienda cada uno en vez de uno comparable.
+    """
+    return bool(a.model_codes) and bool(b.model_codes) and _codes_overlap(a.model_codes, b.model_codes)
 
 
 def _candidate_from_product(product: Product) -> _Candidate:
@@ -137,12 +174,19 @@ def _create_product(db: Session, listing: Listing) -> Product:
     if color is not None:
         attributes["color"] = color
 
+    # Los recortes siguen los largos declarados en `app/models/product.py`: Postgres
+    # aborta la transaccion entera con `StringDataRightTruncation` (SQLite no dice nada),
+    # y como el matcher corre en una sola transaccion eso perderia toda la corrida.
+    model = guess_model(listing.title, brand)
     product = Product(
         canonical_title=listing.title[:512],
-        brand=brand.upper() if brand and len(brand) <= 3 else (brand.capitalize() if brand else None),
-        model=guess_model(listing.title, brand),
+        brand=(brand.upper() if len(brand) <= 3 else brand.capitalize())[:128] if brand else None,
+        model=model[:128] if model else None,
         category=None,
-        catalog_product_id=None,
+        # El id de catalogo de la publicacion, cuando la fuente lo provee: hace que la
+        # proxima publicacion con el mismo id caiga en este producto por la via
+        # deterministica en vez de por similitud de titulos.
+        catalog_product_id=listing.catalog_product_id,
         attributes_json=attributes,
     )
     db.add(product)
@@ -172,6 +216,19 @@ def _record_match(
     )
 
 
+def _delete_orphan_products(db: Session) -> None:
+    """Borra los productos que quedaron sin ninguna publicación tras un re-matching."""
+    orphan_ids = db.scalars(
+        select(Product.id).outerjoin(Listing, Listing.product_id == Product.id).where(
+            Listing.id.is_(None)
+        )
+    ).all()
+    if not orphan_ids:
+        return
+    db.execute(delete(ProductMatch).where(ProductMatch.product_id.in_(orphan_ids)))
+    db.execute(delete(Product).where(Product.id.in_(orphan_ids)))
+
+
 def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
     """Recorre las publicaciones y las agrupa en productos.
 
@@ -184,9 +241,21 @@ def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
         stmt = stmt.where(Listing.product_id.is_(None))
     listings = list(db.scalars(stmt))
 
-    candidates = [
-        _candidate_from_product(product) for product in db.scalars(select(Product)).all()
-    ]
+    if only_unmatched:
+        candidates = [
+            _candidate_from_product(product) for product in db.scalars(select(Product)).all()
+        ]
+    else:
+        # Re-evaluación completa: los clusters se reconstruyen desde cero. Sin esto,
+        # cada publicación encontraba el producto singleton que el propio matcher le
+        # había creado antes (cuyo `canonical_title` ES su título, o sea Jaccard 1.0),
+        # se re-asignaba a sí misma y `--all` no fusionaba NADA. Los productos que
+        # queden vacíos se borran al final.
+        candidates = []
+        for listing in listings:
+            listing.product_id = None
+        db.flush()
+
     by_catalog_id = {
         c.product.catalog_product_id: c for c in candidates if c.product.catalog_product_id
     }
@@ -201,7 +270,7 @@ def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
         seen += 1
         listing_fp = fingerprint(listing.title)
 
-        catalog_id = getattr(listing, "catalog_product_id", None)
+        catalog_id = listing.catalog_product_id
         if catalog_id and catalog_id in by_catalog_id:
             product = by_catalog_id[catalog_id].product
             listing.product_id = product.id
@@ -210,12 +279,24 @@ def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
             continue
 
         best: tuple[float, _Candidate] | None = None
+        exact: _Candidate | None = None
         for candidate in candidates:
             if _conflicts(candidate.fingerprint, listing_fp):
                 continue
+            # El código de fabricante compartido gana sin mirar el Jaccard: dos tiendas
+            # que escriben el mismo `UN50U8000F` hablan del mismo televisor aunque
+            # ordenen el título completamente distinto.
+            if exact is None and _shares_model_code(candidate.fingerprint, listing_fp):
+                exact = candidate
             score = jaccard(candidate.fingerprint.tokens, listing_fp.tokens)
             if best is None or score > best[0]:
                 best = (score, candidate)
+
+        if exact is not None:
+            listing.product_id = exact.product.id
+            _record_match(db, listing, exact.product, MatchMethod.FUZZY, 0.95)
+            by_fuzzy += 1
+            continue
 
         if best and best[0] >= AUTO_MATCH_THRESHOLD:
             product = best[1].product
@@ -232,9 +313,23 @@ def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
 
         product = _create_product(db, listing)
         listing.product_id = product.id
-        _record_match(db, listing, product, MatchMethod.FUZZY, 1.0)
+        # Sin `_record_match`: no hubo comparación con nada, y registrarlo con
+        # confianza 1.0 llenaba la cola de revisión de singletons sin evidencia,
+        # justo en el extremo que el índice ordena como "más confiable".
         created += 1
-        candidates.append(_candidate_from_product(product))
+        new_candidate = _candidate_from_product(product)
+        candidates.append(new_candidate)
+        # El producto recién creado también tiene que entrar al índice por catalog id,
+        # o la segunda publicación con el mismo id no lo encuentra y cae a similitud.
+        if product.catalog_product_id:
+            by_catalog_id.setdefault(product.catalog_product_id, new_candidate)
+
+    if not only_unmatched:
+        # `flush` antes de buscar huérfanos: las reasignaciones de `product_id` viven
+        # solo en la sesión hasta acá, y sin bajarlas el LEFT JOIN ve todos los
+        # productos como vacíos y los borra a todos.
+        db.flush()
+        _delete_orphan_products(db)
 
     db.commit()
     stats = MatchStats(

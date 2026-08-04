@@ -109,14 +109,28 @@ def _load_source(db: Session, source_slug: str) -> RetailerSource:
     return source
 
 
+def _fit(value: str | None, max_length: int) -> str | None:
+    """Trunca al largo de la columna.
+
+    SQLite ignora los largos de `VARCHAR(n)`; Postgres levanta
+    `StringDataRightTruncation` y aborta la transaccion. Como todo el desarrollo corre
+    contra SQLite, un titulo largo de una tienda nueva solo se manifestaria en
+    produccion. Truncar un titulo es preferible a perder la publicacion entera.
+    """
+    if value is None:
+        return None
+    return value if len(value) <= max_length else value[:max_length]
+
+
 def _listing_fields(normalized: NormalizedListingInput) -> dict[str, Any]:
     """Campos de `listing` que vienen del adapter (todo menos las claves de upsert).
 
     `product_id` no aparece aca a proposito: el matching es un paso aparte (punto 8 del
     contrato) y nunca lo toca este worker, ni al insertar ni al actualizar.
     """
+    hint = normalized.product_hint
     return {
-        "title": normalized.title,
+        "title": _fit(normalized.title, 512),
         "permalink": normalized.permalink,
         "condition": normalized.condition,
         "price": normalized.price,
@@ -124,16 +138,20 @@ def _listing_fields(normalized: NormalizedListingInput) -> dict[str, Any]:
         "installments_qty": normalized.installments_qty,
         "installments_amount": normalized.installments_amount,
         "interest_free": normalized.interest_free,
-        "seller_name": normalized.seller_name,
-        "seller_id": normalized.seller_id,
-        "seller_level": normalized.seller_level,
+        "seller_name": _fit(normalized.seller_name, 256),
+        "seller_id": _fit(normalized.seller_id, 64),
+        "seller_level": _fit(normalized.seller_level, 32),
         "seller_sales": normalized.seller_sales,
-        "official_store": normalized.official_store,
+        "official_store": _fit(normalized.official_store, 128),
         "fulfillment": normalized.fulfillment,
         "rating": normalized.rating,
         "reviews_count": normalized.reviews_count,
         "warranty_months": normalized.warranty_months,
         "warranty_type": normalized.warranty_type,
+        # El id de catalogo de la fuente es el mejor dato de matching que existe; antes
+        # el adapter lo extraia y se descartaba aca, y la via deterministica del matcher
+        # quedaba muerta.
+        "catalog_product_id": _fit(hint.catalog_product_id if hint else None, 64),
         "fetched_at": normalized.fetched_at,
     }
 
@@ -266,6 +284,18 @@ def run_ingest(
         )
     else:
         source.last_error = None
+    # Una corrida exitosa levanta el bloqueo: `BlockedBySource` marca la fuente como
+    # `BLOCKED_TOS_REVIEW`, y ML devuelve 403 tanto si te bloquearon como si se te
+    # vencio el token (dura 6 horas). Sin este reset, un token vencido dejaba a la
+    # fuente marcada para siempre y `/como-funciona` publicaba "Pausada por revision de
+    # terminos" aunque la ingesta ya estuviera funcionando de nuevo.
+    if source.status == SourceStatus.BLOCKED_TOS_REVIEW:
+        logger.info(
+            "ingesta[%s]: corrida exitosa, se reactiva la fuente (estaba en %s)",
+            source.slug,
+            source.status.value,
+        )
+        source.status = SourceStatus.ACTIVE
     db.add(source)
     db.commit()
     return result

@@ -117,9 +117,39 @@ VARIANT_MARKERS = frozenset({"mini", "pro", "max", "plus", "ultra", "lite", "air
 #: títulos traen uno, es la señal más fuerte que existe sin id de catálogo.
 _MODEL_CODE_RE = re.compile(r"\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9]{2,}(?:-[a-z0-9]+)*\b")
 
+#: Tokens que la regex de arriba matchea pero que NO identifican un modelo: son
+#: descripciones que aparecen en casi todos los títulos de la categoría, así que
+#: tratarlos como código de fabricante agruparía cosas distintas o separaría iguales.
+_NOT_MODEL_CODES = frozenset(
+    {
+        "4k", "8k", "1080p", "720p", "2160p", "60hz", "120hz", "144hz",
+        "wifi", "usb", "hdmi", "bt5", "5g", "4g", "3g", "lte", "nfc",
+        "w11", "w10", "win11", "win10", "ddr4", "ddr5", "ssd",
+        "type", "typec", "usbc", "led", "oled", "qled",
+    }
+)
+
 
 def extract_variants(text: str) -> frozenset[str]:
     return frozenset(t for t in normalize_text(text).split() if t in VARIANT_MARKERS)
+
+
+def extract_generation_numbers(text: str) -> frozenset[str]:
+    """Números sueltos que identifican la generación o el modelo ("iPhone **13**").
+
+    Es la diferencia entre un iPhone 13 y un iPhone 15: comparten casi todos los tokens
+    y el número es lo único que los separa, así que sin esto el Jaccard los daba como el
+    mismo producto. Se excluyen las cifras que ya tienen otro significado: capacidad
+    (128 GB), tamaño de pantalla (50"), y los números de 4+ dígitos, que suelen ser
+    potencia en watts o litros y varían en la redacción de cada tienda.
+    """
+    normalized = _CAPACITY_RE.sub(" ", normalize_text(text))
+    normalized = _SCREEN_RE.sub(" ", normalized)
+    return frozenset(
+        token
+        for token in normalized.split()
+        if token.isdigit() and 1 <= len(token) <= 3
+    )
 
 
 def extract_model_codes(text: str) -> frozenset[str]:
@@ -129,7 +159,10 @@ def extract_model_codes(text: str) -> frozenset[str]:
     codes = set()
     for match in _MODEL_CODE_RE.finditer(normalized):
         code = match.group(0).replace("-", "")
-        if len(code) >= 5 and code not in COLOR_WORDS:
+        # 4 caracteres es el piso: hay códigos reales cortos ("S90D", "N305") y con un
+        # piso de 5 dos televisores distintos de la misma marca quedaban sin señal que
+        # los separara y el Jaccard los fusionaba.
+        if len(code) >= 4 and code not in COLOR_WORDS and code not in _NOT_MODEL_CODES:
             codes.add(code)
     return frozenset(codes)
 

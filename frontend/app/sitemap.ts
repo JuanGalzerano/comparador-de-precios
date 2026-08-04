@@ -1,9 +1,9 @@
 import type { MetadataRoute } from "next";
-import { API_URL } from "@/lib/config";
+import { API_URL, SITE_URL } from "@/lib/config";
 import { fetchJson } from "@/lib/fetch-result";
 import type { SearchResponse } from "@/lib/types";
 
-const BASE = "https://cotejo.ar";
+const BASE = SITE_URL;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const static_pages: MetadataRoute.Sitemap = [
@@ -12,8 +12,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/ingresar`, changeFrequency: "monthly", priority: 0.3 },
   ];
 
+  // 100 es el máximo que acepta el backend (`page_size: le=100`). Con 200 respondía
+  // HTTP 422 y el sitemap caía al fallback estático, sin ningún producto y sin ruido.
   const result = await fetchJson<SearchResponse>(
-    `${API_URL}/search?${new URLSearchParams({ page_size: "200" })}`,
+    `${API_URL}/search?${new URLSearchParams({ page_size: "100" })}`,
   );
   if (!result.ok) return static_pages;
 
