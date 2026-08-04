@@ -3,8 +3,9 @@
 Actualizado: 2026-08-04, después de dos auditorías completas del código (estructura del
 backend, y si los pasos manuales de estos `.md` realmente funcionan).
 
-**Estado en una línea:** el comparador funciona de verdad en local, con datos reales de
-tres tiendas y 50 productos comparables entre ellas. Lo que falta es ponerlo online.
+**Estado en una línea:** el comparador funciona de verdad en local — busca en Frávega,
+Cetrogar y Naldo en vivo, agrupa el mismo producto entre tiendas y guarda lo que
+encuentra. Lo que falta es ponerlo online y que los precios se actualicen solos.
 
 ---
 
@@ -132,7 +133,8 @@ Medido sobre los datos reales del proyecto, no estimado:
 | **Neon** | 512 MB | ~1.000.000 |
 | **Supabase** | 500 MB | ~1.000.000 |
 
-**Un millón de publicaciones entra en el plan gratis.** Hoy tenés 426. El catálogo entero
+**Un millón de publicaciones entra en el plan gratis.** Hoy tenés ~500, y crecen solas
+con cada búsqueda nueva (§3). El catálogo entero
 de las tres tiendas son decenas de miles, no millones. **El catálogo no es el problema.**
 
 ### El problema real es el historial de precios
@@ -196,17 +198,45 @@ La base deja de ser "un catálogo del mundo" y pasa a ser **un caché de lo que 
 realmente busca**. Guardás miles de productos, no millones, y el plan gratis te sobra por
 años.
 
-Hoy esto está implementado **a medias**: `/search` consulta MercadoLibre en vivo cuando la
-base no alcanza, pero solo ML, y **no guarda el resultado**. Extenderlo a las tres tiendas
-VTEX y persistir lo que llega es la mejora de arquitectura más importante que queda
-pendiente (§4-A).
+### ✅ Implementado el 2026-08-04 — `app/services/live_search.py`
+
+Verificado de punta a punta buscando "aspiradora robot", que no existía en la base:
+
+```
+1ra búsqueda:  2002 ms   -> consulta las 3 tiendas, guarda 29 publicaciones, las agrupa
+2da búsqueda:   660 ms   -> sale de la base
+```
+
+Cómo funciona:
+
+1. `/search` mira cuántos productos tiene la base para ese término. Si son menos de 5,
+   consulta las tiendas.
+2. Las tres se consultan **en paralelo** (1,8 s en vez de más de 4 secuencial). Una tienda
+   caída o lenta no rompe la búsqueda: se muestra lo que contestaron las otras.
+3. Lo que llega se guarda con el **mismo `upsert` que la ingesta programada**, así una
+   publicación traída en vivo y una traída por el worker son indistinguibles.
+4. Se corre el matcher, para que lo nuevo quede agrupado y aparezca en los resultados.
+
+Detalles que importan:
+
+- **Cooldown de 15 minutos por término.** Sin esto, cada F5 sobre una búsqueda popular
+  dispararía tres llamadas HTTP a las tiendas.
+- **Solo en la primera página y solo con término de búsqueda.** Paginar o navegar el
+  catálogo nunca genera tráfico hacia las tiendas.
+- **Se puede desactivar** con `?live=false` (útil para el sitemap o para debug).
+- **La escritura corre en el hilo principal**, no en los hilos que hacen HTTP: una
+  `Session` de SQLAlchemy no es thread-safe.
+
+Lo que **no** reemplaza: el worker de ingesta sigue siendo quien mantiene frescos los
+precios de lo que ya se conoce. Esto solo cubre el hueco de "nadie buscó esto todavía".
 
 ### Cómo hacerlo más rápido
 
 Los 2 segundos son casi todos espera de red, no cálculo:
 
 1. **Devolver resultados a medida que llegan.** Naldo contesta en 640 ms y Frávega en
-   1758 ms; hoy se espera a la más lenta para mostrar todo.
+   1758 ms; hoy se espera a la más lenta para mostrar todo. (Las consultas ya son
+   paralelas; falta que la respuesta se vaya enviando en partes.)
 2. **Pasar los adapters a `async`.** Hoy son bloqueantes: dos usuarios buscando a la vez
    se hacen cola. Es el cambio más importante para aguantar tráfico real (§5-2).
 3. **Caché de búsquedas frecuentes** (15 minutos). "iphone" lo van a buscar mil veces.
@@ -235,11 +265,10 @@ HTML. Vale la pena probar ese camino primero con cada tienda nueva.
 
 Ordenado por impacto. Decime cuál querés.
 
-### A. 🥇 Búsqueda en vivo en las tres tiendas + guardado automático
-El cambio de arquitectura de §3. Hace que el sitio responda cualquier búsqueda, no solo
-lo que ya está cargado, y que la base crezca sola con lo que la gente busca.
+### A. ✅ Búsqueda en vivo + guardado automático — HECHO (2026-08-04)
+Ver §3. El sitio ya responde cualquier búsqueda, no solo lo que estaba cargado.
 
-### B. 🥈 Alertas de bajada de precio
+### B. 🥇 Alertas de bajada de precio
 Necesita que vos elijas el canal (email / push / panel).
 
 ### C. 🥉 Retención de 90 días en el historial
@@ -301,7 +330,8 @@ Ver §4-C. **Es lo único de esta lista que hay que resolver antes de automatiza
 
 Para no volver a pedirlo:
 
-- ✅ **Tres tiendas con datos reales**: Frávega, Cetrogar y Naldo. 426 publicaciones.
+- ✅ **Tres tiendas con datos reales**: Frávega, Cetrogar y Naldo. La base crece sola
+  con cada búsqueda nueva (514 publicaciones al momento de escribir esto).
 - ✅ **Matching entre tiendas**: 50 productos comparables entre 2 y 3 tiendas.
 - ✅ **Ranking de tiendas por competitividad** (`/sources`), con datos propios.
 - ✅ **Gráfico de historial de precios** en la ficha de producto.
@@ -309,7 +339,7 @@ Para no volver a pedirlo:
 - ✅ **Pegar el link de cualquier tienda** en el buscador.
 - ✅ **SEO**: sitemap, robots, metadatos. Falta solo la imagen de Open Graph.
 - ✅ **Responsive**, verificado a 390 px y 1600×600.
-- ✅ **123 tests**.
+- ✅ **130 tests**.
 - ✅ **Seed de tiendas para producción** (`scripts/seed_sources.py`).
 - ✅ **Sin secretos en el repo** — auditado sobre todo el historial de git.
 

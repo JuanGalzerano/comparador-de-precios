@@ -43,6 +43,7 @@ from app.models.product import Product
 from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
 from app.schemas.search import ProductClusterOut, SearchResponse
+from app.services.live_search import fetch_live, should_fetch
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
@@ -175,6 +176,45 @@ def _build_filters(
     return filters
 
 
+#: Cuántos clusters tiene que tener ya la base para considerar que la búsqueda está
+#: cubierta y no hace falta molestar a las tiendas.
+_LIVE_ENOUGH_RESULTS = 5
+
+
+def _maybe_fetch_live(
+    db: DbSession,
+    term: str,
+    *,
+    category: str | None,
+    condition: str,
+) -> None:
+    """Consulta las tiendas en vivo si la base no tiene suficiente para este término.
+
+    Se hace ANTES de la query principal para que los resultados nuevos entren en la
+    misma respuesta. El costo (~2s) lo paga solo la primera persona que busca algo
+    nuevo; después queda cacheado en la base.
+    """
+    existing = db.execute(
+        select(func.count(func.distinct(Listing.product_id)))
+        .select_from(Listing)
+        .join(Product, Listing.product_id == Product.id)
+        .where(*_build_filters(q=term, category=category, condition=condition))  # type: ignore[arg-type]
+    ).scalar_one()
+
+    if existing >= _LIVE_ENOUGH_RESULTS:
+        return
+    if not should_fetch(term):
+        return
+
+    try:
+        fetch_live(db, term)
+    except Exception as exc:
+        # Una búsqueda en vivo fallida nunca puede romper la búsqueda: se sigue con lo
+        # que haya en la base.
+        db.rollback()
+        logger.warning("live search failed for %r: %s", term, exc)
+
+
 @router.get("", response_model=SearchResponse)
 def search(
     db: DbSession,
@@ -192,9 +232,22 @@ def search(
         description="Mínimo de tiendas distintas que deben publicar el producto. "
         "Con 2, solo devuelve productos efectivamente comparables entre tiendas.",
     ),
+    live: bool = Query(
+        default=True,
+        description="Si la base no tiene suficientes resultados, consultar las tiendas "
+        "en vivo y guardar lo que llegue (agrega ~2s a esa primera búsqueda).",
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> SearchResponse:
+    # Caché bajo demanda: si nadie buscó esto antes, la base no lo tiene. En vez de
+    # devolver "sin resultados", se les pregunta a las tiendas, se guarda y se sigue
+    # normal — la próxima búsqueda del mismo término ya sale de la base.
+    # Solo en la primera página y solo con término de búsqueda: paginar o navegar el
+    # catálogo no puede disparar tráfico a las tiendas.
+    if live and q and q.strip() and page == 1:
+        _maybe_fetch_live(db, q.strip(), category=category, condition=condition)
+
     filters = _build_filters(q=q, category=category, condition=condition)
 
     # --- Paso 1: agregado por producto (cuenta + min/max de `final_price`) ------

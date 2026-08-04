@@ -496,6 +496,38 @@ textarea.input { min-height: 90px; resize: vertical; }
   }
 }
 
+/* ── Skeleton de carga (búsqueda en vivo contra las tiendas) ─────────── */
+.skeleton-card {
+  cursor: default;
+  pointer-events: none;
+}
+.skeleton-block,
+.skeleton-line {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-text) 6%, transparent) 25%,
+    color-mix(in srgb, var(--color-text) 12%, transparent) 37%,
+    color-mix(in srgb, var(--color-text) 6%, transparent) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+  border-radius: var(--radius-sm);
+}
+.skeleton-line {
+  height: 13px;
+  margin-bottom: var(--space-3);
+}
+.skeleton-line:last-child { margin-bottom: 0; }
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block,
+  .skeleton-line { animation: none; }
+}
+
 /* ── Retailer badge ──────────────────────────────────────────────────── */
 .retailer-badge {
   display: inline-flex;

@@ -195,14 +195,17 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
                 ].join(" · ")}
               </div>
             </div>
+            {/* `target="_blank"` en todos los links salientes: el usuario se lleva la
+                publicación a otra pestaña y Cotejo le queda abierto para seguir
+                comparando. `noopener noreferrer` porque son sitios de terceros. */}
             <a
               className="btn btn-primary"
               href={best.permalink}
               target="_blank"
-              rel="noopener"
+              rel="noopener noreferrer"
               style={{ minHeight: 40, whiteSpace: "nowrap" }}
             >
-              Ver en el sitio oficial
+              Ver en {best.retailer_name ?? "el sitio oficial"} ↗
             </a>
           </div>
         ) : (
@@ -342,8 +345,14 @@ function ListingRow({ listing, mark }: { listing: Listing; mark: string | undefi
         {listing.score}
       </td>
       <td style={{ textAlign: "right" }}>
-        <a href={listing.permalink} target="_blank" rel="noopener" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
-          Ir a la publicación
+        <a
+          href={listing.permalink}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Se abre en una pestaña nueva${listing.retailer_name ? ` (${listing.retailer_name})` : ""}`}
+          style={{ fontSize: 12.5, whiteSpace: "nowrap" }}
+        >
+          Ir a la publicación ↗
         </a>
       </td>
     </tr>

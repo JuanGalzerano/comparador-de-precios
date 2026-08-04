@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { API_URL } from "@/lib/config";
 import { fetchJson } from "@/lib/fetch-result";
@@ -41,7 +42,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       ) : (
         <>
           {linkInfo && <ProductUrlBanner query={effectiveQuery} link={linkInfo} />}
-          <SearchResults query={effectiveQuery} />
+          {/* `key` fuerza un Suspense nuevo por búsqueda: sin eso, al buscar otra cosa
+              React reusa el resultado anterior y la pantalla queda congelada mostrando
+              los productos viejos durante los ~2s que tarda la consulta a las tiendas. */}
+          <Suspense key={effectiveQuery} fallback={<SearchSkeleton query={effectiveQuery} />}>
+            <SearchResults query={effectiveQuery} />
+          </Suspense>
         </>
       )}
     </main>
@@ -301,6 +307,40 @@ function ClusterSection({
           <ProductClusterCard key={cluster.id} cluster={cluster} />
         ))}
       </div>
+    </section>
+  );
+}
+
+/**
+ * Lo que se ve mientras el backend consulta las tiendas. Solo aparece cuando el término
+ * no está en la base todavía (la primera vez que alguien lo busca): a partir de ahí sale
+ * de la base y la respuesta es inmediata.
+ */
+function SearchSkeleton({ query }: { query: string }) {
+  return (
+    <section style={{ marginTop: 24 }}>
+      <div className="section-header">
+        <h2 className="section-title">{query}</h2>
+        <span className="section-count">buscando…</span>
+      </div>
+
+      <p className="text-muted" style={{ fontSize: 13, marginBottom: "var(--space-4)" }}>
+        Consultando Frávega, Cetrogar y Naldo…
+      </p>
+
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="cluster-card skeleton-card" aria-hidden="true">
+          <div className="product-avatar skeleton-block" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="skeleton-line" style={{ width: "45%" }} />
+            <div className="skeleton-line" style={{ width: "28%", height: 10 }} />
+            <div className="skeleton-line" style={{ width: "18%", height: 10 }} />
+          </div>
+          <div style={{ minWidth: 140 }}>
+            <div className="skeleton-line" style={{ width: "70%", height: 18, marginLeft: "auto" }} />
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
