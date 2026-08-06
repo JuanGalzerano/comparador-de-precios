@@ -16,19 +16,28 @@ agregacion mas alla de la ventana de tiempo (default 90 dias, el mismo horizonte
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.enums import ItemCondition
 from app.models.listing import Listing
 from app.models.price_history import PriceHistory
 from app.models.product import Product
+from app.models.product_match import ProductMatch
 from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
-from app.schemas.product import ListingOut, PriceHistoryPoint, PriceHistoryResponse, ProductDetailOut
+from app.schemas.product import (
+    ListingOut,
+    PriceHistoryPoint,
+    PriceHistoryResponse,
+    ProductDetailOut,
+    SimilarProductOut,
+    SimilarProductsResponse,
+)
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -196,3 +205,115 @@ def get_price_history(
         for row in rows
     ]
     return PriceHistoryResponse(product_id=product_id, since=since, points=points)
+
+
+#: Un "similar" tiene que estar en el mismo orden de precio que el producto de la ficha.
+#: Fuera de esta banda es otra cosa: un accesorio (la funda del teléfono) o un producto
+#: de otra gama que comparte palabras en el título.
+_SIMILAR_PRICE_MIN_RATIO = 0.3
+_SIMILAR_PRICE_MAX_RATIO = 3.0
+
+
+def _price_is_comparable(own_price: Decimal | None, other_price: Decimal | None) -> bool:
+    """`True` si los dos precios están en el mismo orden de magnitud."""
+    if own_price is None or other_price is None or own_price <= 0:
+        # Sin precio de referencia no se puede filtrar; se deja pasar (el usuario ve el
+        # precio igual y decide) en vez de esconder resultados por falta de dato.
+        return True
+    ratio = float(other_price) / float(own_price)
+    return _SIMILAR_PRICE_MIN_RATIO <= ratio <= _SIMILAR_PRICE_MAX_RATIO
+
+
+@router.get("/{product_id}/similar", response_model=SimilarProductsResponse)
+def get_similar(
+    db: DbSession,
+    product_id: int,
+    limit: int = Query(default=6, ge=1, le=20),
+) -> SimilarProductsResponse:
+    """Productos PARECIDOS al de la ficha, con su precio.
+
+    No son el mismo producto: son los candidatos que el matcher evaluó y no aplicó (ver
+    `SimilarProductOut`). Se separan del cluster a propósito — mezclarlos haría que el
+    ahorro anunciado compare cosas distintas — pero se muestran aparte porque un modelo
+    vecino más barato es información útil para decidir.
+
+    La relación es simétrica: sirve tanto un candidato que salió de una publicación de
+    ESTE producto, como uno de otro producto que apuntaba a este.
+    """
+    _get_product_or_404(db, product_id)
+
+    mine = (
+        select(ProductMatch.product_id.label("other_id"), ProductMatch.confidence)
+        .join(Listing, Listing.id == ProductMatch.listing_id)
+        .where(Listing.product_id == product_id, ProductMatch.product_id != product_id)
+    )
+    theirs = (
+        select(Listing.product_id.label("other_id"), ProductMatch.confidence)
+        .join(Listing, Listing.id == ProductMatch.listing_id)
+        .where(
+            ProductMatch.product_id == product_id,
+            Listing.product_id.is_not(None),
+            Listing.product_id != product_id,
+        )
+    )
+
+    # Un mismo par puede aparecer por los dos lados: se queda la confianza más alta.
+    best: dict[int, float] = {}
+    for other_id, confidence in db.execute(mine.union_all(theirs)).all():
+        if other_id is None:
+            continue
+        best[other_id] = max(best.get(other_id, 0.0), float(confidence))
+
+    if not best:
+        return SimilarProductsResponse(product_id=product_id, items=[])
+
+    top_ids = [pid for pid, _ in sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
+
+    summaries = {
+        row.product_id: row
+        for row in db.execute(
+            select(
+                Listing.product_id,
+                func.count(Listing.id).label("listing_count"),
+                func.count(func.distinct(Listing.retailer_source_id)).label("retailer_count"),
+                func.min(Listing.final_price).label("min_final_price"),
+                func.max(Listing.final_price).label("max_final_price"),
+            )
+            .where(Listing.product_id.in_(top_ids))
+            .group_by(Listing.product_id)
+        ).all()
+    }
+    products = {p.id: p for p in db.scalars(select(Product).where(Product.id.in_(top_ids))).all()}
+
+    # Precio del producto de la ficha, para descartar accesorios: una funda de iPhone
+    # comparte casi todos los tokens del título con el teléfono, así que entra como
+    # candidato — pero a $17.000 contra $1.200.000 no es una alternativa de compra.
+    own_price = db.scalar(
+        select(func.min(Listing.final_price)).where(Listing.product_id == product_id)
+    )
+
+    items: list[SimilarProductOut] = []
+    for pid in top_ids:
+        product = products.get(pid)
+        summary = summaries.get(pid)
+        # Un candidato puede haberse quedado sin publicaciones (evicción, o el producto
+        # se fusionó): no se muestra un similar sin precio.
+        if product is None or summary is None:
+            continue
+        if not _price_is_comparable(own_price, summary.min_final_price):
+            continue
+        items.append(
+            SimilarProductOut(
+                id=product.id,
+                canonical_title=product.canonical_title,
+                brand=product.brand,
+                model=product.model,
+                listing_count=summary.listing_count,
+                retailer_count=summary.retailer_count,
+                min_final_price=summary.min_final_price,
+                max_final_price=summary.max_final_price,
+                confidence=round(best[pid], 3),
+            )
+        )
+
+    return SimilarProductsResponse(product_id=product_id, items=items)

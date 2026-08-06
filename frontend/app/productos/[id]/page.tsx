@@ -24,6 +24,7 @@ import type {
 } from "@/lib/types";
 import { SaveButton } from "@/components/SaveButton";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
+import { SimilarProducts } from "@/components/SimilarProducts";
 import { ProductFilters } from "./ProductFilters";
 
 interface ProductPageProps {
@@ -273,6 +274,8 @@ export default async function ProductPage({ params, searchParams }: ProductPageP
           </div>
         )}
       </section>
+
+      <SimilarProducts productId={product.id} />
     </main>
   );
 }

@@ -139,6 +139,31 @@ export interface SavedProductIdsResponse {
   product_ids: number[];
 }
 
+/**
+ * `SimilarProductOut` — un producto PARECIDO, no el mismo.
+ *
+ * Sale de `GET /products/{id}/similar`: son los candidatos que el matcher evaluó y
+ * descartó como cluster. Se muestran aparte de la tabla comparativa a propósito —
+ * mezclarlos haría que el ahorro anunciado compare productos distintos.
+ */
+export interface SimilarProduct {
+  id: number;
+  canonical_title: string;
+  brand: string | null;
+  model: string | null;
+  listing_count: number;
+  retailer_count: number;
+  min_final_price: string | null;
+  max_final_price: string | null;
+  /** Cuánto se parece al producto de la ficha, 0..1. */
+  confidence: number;
+}
+
+export interface SimilarProductsResponse {
+  product_id: number;
+  items: SimilarProduct[];
+}
+
 /** `SourceOut` — una fuente de datos en `GET /sources`. */
 export interface Source {
   slug: string;

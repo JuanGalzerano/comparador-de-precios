@@ -528,6 +528,32 @@ textarea.input { min-height: 90px; resize: vertical; }
   .skeleton-line { animation: none; }
 }
 
+/* ── Similares (otros modelos parecidos, no el mismo producto) ────────── */
+.similar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-3);
+}
+.similar-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 132px;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.similar-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
+  text-decoration: none;
+  color: inherit;
+}
+
 /* ── Retailer badge ──────────────────────────────────────────────────── */
 .retailer-badge {
   display: inline-flex;

@@ -69,6 +69,36 @@ class ProductDetailOut(BaseModel):
     listings: list[ListingOut]
 
 
+class SimilarProductOut(BaseModel):
+    """Un producto PARECIDO, no el mismo.
+
+    Sale de los candidatos que el matcher consideró pero no aplicó: quedaron entre
+    `REVIEW_THRESHOLD` y `AUTO_MATCH_THRESHOLD` de similitud, o los descartó una guarda
+    dura (otra capacidad, otra generación, otro tamaño de pantalla). Como cluster serían
+    un error — el "ahorrás hasta X" mentiría, porque no se está comparando lo mismo —
+    pero como alternativa a la vista son exactamente lo que un comprador quiere ver.
+    """
+
+    id: int
+    canonical_title: str
+    brand: str | None
+    model: str | None
+
+    #: Publicaciones y tiendas de ESE producto (no del que se está mirando).
+    listing_count: int
+    retailer_count: int
+    min_final_price: Decimal | None
+    max_final_price: Decimal | None
+
+    #: Cuánto se parece al producto de la ficha (0-1). Se muestra ordenado por esto.
+    confidence: float
+
+
+class SimilarProductsResponse(BaseModel):
+    product_id: int
+    items: list[SimilarProductOut]
+
+
 class PriceHistoryPoint(BaseModel):
     """Un punto crudo de `price_history`. Sin agregacion: ver docstring del router."""
 
