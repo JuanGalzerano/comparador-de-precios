@@ -117,6 +117,16 @@ VARIANT_MARKERS = frozenset({"mini", "pro", "max", "plus", "ultra", "lite", "air
 #: títulos traen uno, es la señal más fuerte que existe sin id de catálogo.
 _MODEL_CODE_RE = re.compile(r"\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9]{2,}(?:-[a-z0-9]+)*\b")
 
+#: Medidas: un número pegado a una unidad. La regex de código de modelo las matchea
+#: (tienen letras y dígitos), pero "800W" describe la potencia de CUALQUIER aparato, no
+#: identifica un producto. Tratarlas como código agrupaba una tostadora de 800 W con un
+#: aire acondicionado de 2800 W.
+_MEASUREMENT_RE = re.compile(
+    r"^\d+(?:[.,]\d+)?"
+    r"(?:w|kw|rpm|kg|gr?|lt?|ml|hz|khz|mhz|ghz|v|va|ah|mah|wh|pa|bar|"
+    r"cm|mm|mts?|pulg|fg|btu|cc|psi|nm|lm|k)$"
+)
+
 #: Tokens que la regex de arriba matchea pero que NO identifican un modelo: son
 #: descripciones que aparecen en casi todos los títulos de la categoría, así que
 #: tratarlos como código de fabricante agruparía cosas distintas o separaría iguales.
@@ -139,17 +149,26 @@ def extract_generation_numbers(text: str) -> frozenset[str]:
 
     Es la diferencia entre un iPhone 13 y un iPhone 15: comparten casi todos los tokens
     y el número es lo único que los separa, así que sin esto el Jaccard los daba como el
-    mismo producto. Se excluyen las cifras que ya tienen otro significado: capacidad
-    (128 GB), tamaño de pantalla (50"), y los números de 4+ dígitos, que suelen ser
-    potencia en watts o litros y varían en la redacción de cada tienda.
+    mismo producto. Se excluye la capacidad (128 GB), que ya se compara aparte, y los
+    números de 4+ dígitos, que suelen ser potencia en watts o litros y varían según cómo
+    los escriba cada tienda.
+
+    El tamaño de pantalla SÍ cuenta acá. Podría parecer redundante con
+    `extract_screen_inches`, pero esa función necesita la unidad explícita (`50"`,
+    `50 pulgadas`) y muchas tiendas escriben `Smart Tv Philips 55 Pud7309/77` a secas.
+    Contando el número suelto, un televisor de 50" y uno de 55" de la misma línea —que
+    comparten el código de fabricante— quedan separados igual.
     """
     normalized = _CAPACITY_RE.sub(" ", normalize_text(text))
-    normalized = _SCREEN_RE.sub(" ", normalized)
-    return frozenset(
-        token
-        for token in normalized.split()
-        if token.isdigit() and 1 <= len(token) <= 3
-    )
+    numbers = set()
+    for token in normalized.split():
+        # `50''` y `50"` son el mismo número que `50`: sin sacar las comillas el token
+        # no pasa `isdigit()` y el tamaño se perdía justo en los títulos que lo escriben
+        # con la unidad pegada.
+        token = token.strip("\"'")
+        if token.isdigit() and 1 <= len(token) <= 3:
+            numbers.add(token)
+    return frozenset(numbers)
 
 
 def extract_model_codes(text: str) -> frozenset[str]:
@@ -158,12 +177,16 @@ def extract_model_codes(text: str) -> frozenset[str]:
     normalized = _SCREEN_RE.sub(" ", normalized)
     codes = set()
     for match in _MODEL_CODE_RE.finditer(normalized):
-        code = match.group(0).replace("-", "")
+        raw = match.group(0)
+        code = raw.replace("-", "")
         # 4 caracteres es el piso: hay códigos reales cortos ("S90D", "N305") y con un
         # piso de 5 dos televisores distintos de la misma marca quedaban sin señal que
         # los separara y el Jaccard los fusionaba.
-        if len(code) >= 4 and code not in COLOR_WORDS and code not in _NOT_MODEL_CODES:
-            codes.add(code)
+        if len(code) < 4 or code in COLOR_WORDS or code in _NOT_MODEL_CODES:
+            continue
+        if _MEASUREMENT_RE.match(raw) or _MEASUREMENT_RE.match(code):
+            continue
+        codes.add(code)
     return frozenset(codes)
 
 

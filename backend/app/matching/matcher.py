@@ -80,6 +80,7 @@ class _Fingerprint:
     variants: frozenset[str]
     model_codes: frozenset[str]
     generations: frozenset[str]
+    screen_inches: float | None
 
 
 @dataclass
@@ -96,6 +97,7 @@ def fingerprint(title: str, *, brand: str | None = None, capacity_gb: int | None
         variants=extract_variants(title),
         model_codes=extract_model_codes(title),
         generations=extract_generation_numbers(title),
+        screen_inches=extract_screen_inches(title),
     )
 
 
@@ -104,6 +106,15 @@ def _conflicts(a: _Fingerprint, b: _Fingerprint) -> bool:
     if a.brand and b.brand and normalize_text(a.brand) != normalize_text(b.brand):
         return True
     if a.capacity_gb is not None and b.capacity_gb is not None and a.capacity_gb != b.capacity_gb:
+        return True
+    # Un televisor de 50" y uno de 55" de la misma linea comparten el codigo de
+    # fabricante (`50PUD7309` / `PUD7309`), asi que sin esta guarda se agrupaban y la
+    # ficha comparaba dos productos de tamano distinto.
+    if (
+        a.screen_inches is not None
+        and b.screen_inches is not None
+        and abs(a.screen_inches - b.screen_inches) > 0.5
+    ):
         return True
     # "iPhone 13" vs "iPhone 13 Pro Max": mismos tokens casi todos, producto distinto.
     if a.variants != b.variants:
@@ -128,11 +139,21 @@ def _conflicts(a: _Fingerprint, b: _Fingerprint) -> bool:
     return False
 
 
+#: Longitud mínima para aceptar una coincidencia por contención. Con códigos cortos la
+#: contención es puro ruido: `800w` está dentro de `2800w` sin que tengan nada que ver.
+#: Un código de 6+ caracteres contenido en otro sí es señal (`fc0235la` ⊂ `15fc0235la`).
+_MIN_CONTAINMENT_LENGTH = 6
+
+
 def _codes_overlap(a: frozenset[str], b: frozenset[str]) -> bool:
     """Hay un código en común, exacto o por contención (`15fc0235la` ⊃ `fc0235la`)."""
     if a & b:
         return True
-    return any(x in y or y in x for x in a for y in b)
+    return any(
+        (x in y or y in x) and min(len(x), len(y)) >= _MIN_CONTAINMENT_LENGTH
+        for x in a
+        for y in b
+    )
 
 
 def _shares_model_code(a: _Fingerprint, b: _Fingerprint) -> bool:
@@ -178,6 +199,16 @@ def _create_product(db: Session, listing: Listing) -> Product:
     # aborta la transaccion entera con `StringDataRightTruncation` (SQLite no dice nada),
     # y como el matcher corre en una sola transaccion eso perderia toda la corrida.
     model = guess_model(listing.title, brand)
+    # `catalog_product_id` es UNIQUE: si ya existe un producto con este id, se deja en
+    # NULL en vez de reventar la corrida entera. Que llegue acá significa que la vía
+    # determinística no lo encontró, así que el producto existente no era candidato
+    # válido (quedó huérfano, o va a borrarse al final de un re-matching).
+    catalog_id = listing.catalog_product_id
+    if catalog_id and db.scalar(
+        select(Product.id).where(Product.catalog_product_id == catalog_id)
+    ):
+        catalog_id = None
+
     product = Product(
         canonical_title=listing.title[:512],
         brand=(brand.upper() if len(brand) <= 3 else brand.capitalize())[:128] if brand else None,
@@ -186,7 +217,7 @@ def _create_product(db: Session, listing: Listing) -> Product:
         # El id de catalogo de la publicacion, cuando la fuente lo provee: hace que la
         # proxima publicacion con el mismo id caiga en este producto por la via
         # deterministica en vez de por similitud de titulos.
-        catalog_product_id=listing.catalog_product_id,
+        catalog_product_id=catalog_id,
         attributes_json=attributes,
     )
     db.add(product)
@@ -271,12 +302,27 @@ def match_listings(db: Session, *, only_unmatched: bool = True) -> MatchStats:
         listing_fp = fingerprint(listing.title)
 
         catalog_id = listing.catalog_product_id
-        if catalog_id and catalog_id in by_catalog_id:
-            product = by_catalog_id[catalog_id].product
-            listing.product_id = product.id
-            _record_match(db, listing, product, MatchMethod.CATALOG_ID, 1.0)
-            by_catalog += 1
-            continue
+        if catalog_id:
+            candidate = by_catalog_id.get(catalog_id)
+            if candidate is None:
+                # También puede existir en la base sin estar entre los candidatos en
+                # memoria: en modo `--all` los candidatos arrancan vacíos, pero los
+                # productos viejos siguen ahí hasta que se borran los huérfanos al final.
+                # Sin esta consulta se creaba un producto nuevo con el mismo
+                # `catalog_product_id` y saltaba el UNIQUE de la columna.
+                existing = db.scalar(
+                    select(Product).where(Product.catalog_product_id == catalog_id)
+                )
+                if existing is not None:
+                    candidate = _candidate_from_product(existing)
+                    candidates.append(candidate)
+                    by_catalog_id[catalog_id] = candidate
+            if candidate is not None:
+                product = candidate.product
+                listing.product_id = product.id
+                _record_match(db, listing, product, MatchMethod.CATALOG_ID, 1.0)
+                by_catalog += 1
+                continue
 
         best: tuple[float, _Candidate] | None = None
         exact: _Candidate | None = None

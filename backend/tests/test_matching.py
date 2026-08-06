@@ -341,3 +341,77 @@ def test_extra_numbers_on_one_side_do_not_block_a_match(db_session: Session) -> 
     match_listings(db_session)
 
     assert _product_of(db_session, largo) == _product_of(db_session, corto)
+
+
+def test_wattage_is_not_a_model_code(db_session: Session) -> None:
+    """"800W" describe la potencia de cualquier aparato, no identifica un producto.
+
+    Caso real: con `800w` tratado como código de fabricante, y aceptando coincidencia
+    por contención (`800w` ⊂ `2800w`), una tostadora terminó dentro del cluster de un
+    aire acondicionado.
+    """
+    a = _source(db_session, "fravega")
+    b = _source(db_session, "cetrogar")
+    tostadora = _listing(db_session, a, "Tostadora Kanji Blanca 800W KJH-TM800-04", "23999")
+    aire = _listing(db_session, b, "Aire Acondicionado Split BGH 2800W FC BS26WCDW", "719999")
+
+    match_listings(db_session)
+
+    assert _product_of(db_session, tostadora) != _product_of(db_session, aire)
+
+
+def test_rpm_shared_between_brands_does_not_merge(db_session: Session) -> None:
+    """Dos lavarropas de 1000 RPM de marcas distintas no son el mismo producto."""
+    a = _source(db_session, "fravega")
+    b = _source(db_session, "cetrogar")
+    midea = _listing(db_session, a, "Lavarropas Midea Carga Frontal 6kg 1000rpm MF100W60", "529999")
+    philco = _listing(db_session, b, "Lavarropas Philco PHLF61BN 6 KG 1000RPM CF blanco", "669999")
+
+    match_listings(db_session)
+
+    assert _product_of(db_session, midea) != _product_of(db_session, philco)
+
+
+def test_containment_still_works_for_long_codes(db_session: Session) -> None:
+    """La contención sigue valiendo cuando el código es largo: `50a64n` ⊂ `9150a64n`."""
+    a = _source(db_session, "fravega")
+    b = _source(db_session, "cetrogar")
+    uno = _listing(db_session, a, 'Smart TV 50" Hisense HD LED VIDAA 50A64N', "579999")
+    otro = _listing(db_session, b, "Smart TV LED 50'' Hisense 9150A64N 4K HDR", "699999")
+
+    match_listings(db_session)
+
+    assert _product_of(db_session, uno) == _product_of(db_session, otro)
+
+
+def test_same_tv_line_in_two_sizes_stays_separate(db_session: Session) -> None:
+    """Un TV de 50" y uno de 55" de la misma línea comparten código de fabricante.
+
+    `50PUD7309/77` y `PUD7309/77` se solapan por contención, así que el código los
+    unía. El tamaño es lo único que los distingue, y muchas tiendas lo escriben sin
+    unidad ("Philips 55 Pud7309/77"), por eso se compara como número suelto.
+    """
+    a = _source(db_session, "cetrogar")
+    b = _source(db_session, "naldo")
+    cincuenta = _listing(db_session, a, "TV LED 50'' 50PUD7309/77 4K HDR Philips", "699999")
+    cincuenta_cinco = _listing(
+        db_session, b, "Smart Tv Philips 55 Pud7309/77 4k Uhd Titan Tv", "769999"
+    )
+
+    match_listings(db_session)
+
+    assert _product_of(db_session, cincuenta) != _product_of(db_session, cincuenta_cinco)
+
+
+def test_same_tv_across_stores_still_merges(db_session: Session) -> None:
+    """La guarda de tamaño no puede romper el caso que sí tiene que agrupar."""
+    a = _source(db_session, "cetrogar")
+    b = _source(db_session, "fravega")
+    uno = _listing(db_session, a, "TV LED 50'' 50PUD7309/77 4K HDR Philips", "699999")
+    otro = _listing(
+        db_session, b, "Smart TV Philips LED 50” 4K UHD Titan OS 50PUD7309/77", "659999"
+    )
+
+    match_listings(db_session)
+
+    assert _product_of(db_session, uno) == _product_of(db_session, otro)
