@@ -51,6 +51,43 @@ SOURCES: list[dict] = [
         "tos_risk_note": None,
     },
     {
+        "slug": "oncity",
+        "display_name": "OnCity",
+        "kind": SourceKind.VTEX,
+        "status": SourceStatus.ACTIVE,
+        # VTEX clásico: devuelve 404 en Intelligent Search (ver `VtexAdapter`).
+        "config_json": {
+            "base_url": "https://www.oncity.com",
+            "api_flavor": "legacy_catalog",
+        },
+        "tos_risk_note": None,
+    },
+    {
+        "slug": "megatone",
+        "display_name": "Megatone",
+        "kind": SourceKind.SCRAPER,
+        "status": SourceStatus.ACTIVE,
+        # Doofinder: el `hashid` sale del script de configuración del sitio, ver
+        # `app/adapters/doofinder.py`.
+        "config_json": {
+            "base_url": "https://www.megatone.net",
+            "hashid": "7d78864dfd68192d967ce98f7af00970",
+            "zone": "us1",
+        },
+        "tos_risk_note": None,
+    },
+    {
+        "slug": "compragamer",
+        "display_name": "Compra Gamer",
+        "kind": SourceKind.SCRAPER,
+        "status": SourceStatus.ACTIVE,
+        "config_json": {
+            "base_url": "https://compragamer.com",
+            "static_url": "https://static.compragamer.com",
+        },
+        "tos_risk_note": None,
+    },
+    {
         "slug": "mercadolibre",
         "display_name": "MercadoLibre",
         "kind": SourceKind.API,

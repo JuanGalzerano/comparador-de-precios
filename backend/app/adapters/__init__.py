@@ -17,6 +17,7 @@ from app.adapters.errors import (
     SourceUnavailable,
     UnsupportedFetchMode,
 )
+from app.adapters.compragamer import CompraGamerAdapter
 from app.adapters.doofinder import DoofinderAdapter
 from app.adapters.fravega import FravegaAdapter
 from app.adapters.mercadolibre import MercadoLibreAdapter
@@ -55,6 +56,7 @@ __all__ = [
     "FetchRequest",
     "HealthState",
     "HealthStatus",
+    "CompraGamerAdapter",
     "DoofinderAdapter",
     "FravegaAdapter",
     "MercadoLibreAdapter",
