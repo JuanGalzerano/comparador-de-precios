@@ -369,7 +369,22 @@ publicaciones; a partir de ~300.000 hay que cachearlo. **Ya tiene el índice que
 `ILIKE '%texto%'` obliga a recorrer la tabla completa. La solución (índice GIN con
 `pg_trgm`) solo aplica a Postgres, así que recién se puede hacer después de desplegar.
 
-### 5. La evicción no corre sola todavía
+### 5. Los precios no siempre son comparables entre tiendas
+
+Compra Gamer destaca el precio **con 10% de descuento por transferencia**; con tarjeta
+sale bastante más. Las otras cinco publican su precio de lista sin descuentos por medio
+de pago.
+
+Decisión tomada el 2026-08-06: se guarda el precio que la tienda destaca, porque es el
+que el usuario ve al hacer clic — mostrar otro número haría dudar del comparador. La
+consecuencia es que **Compra Gamer aparece más barata de lo que sale con tarjeta**.
+
+La solución de fondo es guardar los dos precios y mostrar "$X con transferencia · $Y con
+tarjeta". Necesita una columna nueva en `listing` y tocar la ficha. Conviene hacerlo
+cuando haya una segunda fuente que exponga precios por medio de pago — en el retail
+argentino es habitual, así que va a pasar.
+
+### 6. La evicción no corre sola todavía
 La política existe y funciona, pero hay que dispararla (`python -m app.workers.maintenance`).
 Cuando armemos la ingesta automática (§1-B) va en el mismo cron, una vez por día.
 
@@ -379,8 +394,11 @@ Cuando armemos la ingesta automática (§1-B) va en el mismo cron, una vez por d
 
 Para no volver a pedirlo:
 
-- ✅ **Tres tiendas con datos reales**: Frávega, Cetrogar y Naldo. La base crece sola
-  con cada búsqueda nueva (514 publicaciones al momento de escribir esto).
+- ✅ **Seis tiendas con datos reales**: Frávega, Cetrogar, Naldo, OnCity, Megatone y
+  Compra Gamer (esta última cubre tecnología/gaming). La base crece sola con cada
+  búsqueda nueva.
+- ✅ **Similares**: los modelos parecidos se muestran aparte de la comparación estricta,
+  para que el "ahorrás hasta X" no compare productos distintos.
 - ✅ **Matching entre tiendas**: 50 productos comparables entre 2 y 3 tiendas.
 - ✅ **Ranking de tiendas por competitividad** (`/sources`), con datos propios.
 - ✅ **Gráfico de historial de precios** en la ficha de producto.
@@ -388,7 +406,7 @@ Para no volver a pedirlo:
 - ✅ **Pegar el link de cualquier tienda** en el buscador.
 - ✅ **SEO**: sitemap, robots, metadatos. Falta solo la imagen de Open Graph.
 - ✅ **Responsive**, verificado a 390 px y 1600×600.
-- ✅ **146 tests**.
+- ✅ **172 tests**.
 - ✅ **Seed de tiendas para producción** (`scripts/seed_sources.py`).
 - ✅ **Sin secretos en el repo** — auditado sobre todo el historial de git.
 

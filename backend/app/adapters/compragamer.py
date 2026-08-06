@@ -18,6 +18,19 @@ ficha pública del producto 18434 el 2026-08-06; hay un test que lo fija, porque
 fuente que publicara en centavos o en miles ensuciaría todas las comparaciones sin que
 se note a simple vista.
 
+**Limitación conocida — el precio destacado ya trae descuento por medio de pago.**
+Compra Gamer muestra como "Mejor precio" el que incluye 10% off por transferencia
+bancaria; con tarjeta el producto sale `precioLista`. Las otras fuentes publican su
+precio de lista sin descuentos de este tipo, así que Compra Gamer aparece más barata de
+lo que sale pagando con tarjeta.
+
+Se guarda igual `precioEspecial` — decisión explícita — porque es el precio que el
+usuario ve al hacer clic, y mostrar otro número generaría desconfianza en el
+comparador. La solución de fondo es guardar los dos y mostrar "$X con transferencia /
+$Y con tarjeta"; necesita una columna nueva en `listing` y está anotada en
+`PENDIENTE.md`. Vale para cualquier fuente que en el futuro exponga precios por medio
+de pago: el retail argentino los usa mucho.
+
 Campos que esta fuente SÍ provee y las otras no:
 - **Garantía real**, derivada de la marca (`garantia_meses_por_defecto`), y si es
   garantía oficial del fabricante o del comercio.
