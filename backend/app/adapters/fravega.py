@@ -100,7 +100,7 @@ class FravegaAdapter(BaseSourceAdapter):
 
     kind: ClassVar[SourceKind] = SourceKind.VTEX
     capabilities: ClassVar[SourceCapabilities] = SourceCapabilities(
-        supported_modes=frozenset({FetchMode.SEARCH}),
+        supported_modes=frozenset({FetchMode.SEARCH, FetchMode.REFRESH}),
         supports_incremental=False,
         supports_full_catalog=False,
         provides_seller_reputation=False,
@@ -224,6 +224,62 @@ class FravegaAdapter(BaseSourceAdapter):
                 offset += page_size
                 if offset >= total:
                     return
+
+    #: Pausa entre requests del refresh. El GraphQL de Frávega no permite pedir varios
+    #: códigos de una, así que un refresh son cientos de requests seguidas: se espacian
+    #: para no golpearles la API. Configurable con `rate_limit_rps` en `config_json`.
+    _REFRESH_DELAY_SECONDS = 0.25
+
+    def fetch_by_ids(self, request: RefreshRequest) -> Iterator[RawListing]:
+        """Relee publicaciones ya conocidas, una por una, buscando por su código.
+
+        El GraphQL de Frávega **no tiene filtro por SKU**: se introspeccionó el tipo
+        `Filters` y sus campos son keywords, brands, categories, collections, zones,
+        price, sellers, salesChannels, sellerConditions, selectedFilters, discounts e
+        installments. Ninguno sirve para pedir "estos N códigos".
+
+        Lo que sí funciona es buscar el código como palabra clave: devuelve esa
+        publicación y nada más. Verificado contra códigos reales de la base.
+
+        La contra es obvia y hay que asumirla: es **una request por publicación**, no un
+        lote. De ahí la pausa entre requests. Si algún día exponen un filtro por código,
+        esto se reemplaza por un solo request.
+
+        Un código que ya no existe devuelve `total: 0` y simplemente no se emite: que una
+        tienda deje de publicar algo no es información de precio, así que la publicación
+        se queda con su último valor conocido.
+        """
+        codigos = [c for c in request.external_ids if c]
+        if not codigos:
+            return
+
+        rps = self.config.rate_limit_rps
+        pausa = (1.0 / rps) if rps else self._REFRESH_DELAY_SECONDS
+
+        with self._client() as client:
+            for i, codigo in enumerate(codigos):
+                if i:
+                    time.sleep(pausa)
+
+                variables: JsonDict = {
+                    "filters": {"keywords": codigo},
+                    "pagination": {"size": 5, "from": 0},
+                }
+                data = self._gql(client, variables)
+                resultados = (data.get("items") or {}).get("results") or []
+
+                # Buscar por código puede traer productos parecidos: se emite solo el
+                # que coincide exacto, para no pisar una publicación con otra.
+                for item in resultados:
+                    if str(item.get("code") or "") != codigo:
+                        continue
+                    yield RawListing(
+                        source_slug=self.source_slug,
+                        external_id=codigo,
+                        payload=item,
+                        origin_ref=f"{self._base_url()}/api/v2?keywords={codigo}",
+                    )
+                    break
 
     # --- normalize (pura) ---------------------------------------------------
 

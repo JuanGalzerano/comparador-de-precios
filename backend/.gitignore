@@ -13,3 +13,6 @@ build/
 # Archivos temporales del modo WAL de SQLite.
 dev.db-shm
 dev.db-wal
+
+# Logs de la corrida diaria (no se commitean).
+logs/

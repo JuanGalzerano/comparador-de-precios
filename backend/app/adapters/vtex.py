@@ -47,6 +47,7 @@ from app.adapters.types import (
     HealthState,
     HealthStatus,
     NormalizedListingInput,
+    RefreshRequest,
     ProductHint,
     RawListing,
     SearchQuery,
@@ -98,7 +99,7 @@ class VtexAdapter(BaseSourceAdapter):
 
     kind: ClassVar[SourceKind] = SourceKind.VTEX
     capabilities: ClassVar[SourceCapabilities] = SourceCapabilities(
-        supported_modes=frozenset({FetchMode.SEARCH}),
+        supported_modes=frozenset({FetchMode.SEARCH, FetchMode.REFRESH}),
         supports_incremental=False,
         supports_full_catalog=False,
         provides_seller_reputation=False,
@@ -155,7 +156,12 @@ class VtexAdapter(BaseSourceAdapter):
             **({"proxy": self.config.proxy_url} if self.config.proxy_url else {}),
         )
 
-    def _get(self, client: httpx.Client, params: dict[str, Any]) -> JsonDict:
+    def _get(
+        self,
+        client: httpx.Client,
+        params: dict[str, Any] | list[tuple[str, Any]],
+        path: str | None = None,
+    ) -> JsonDict:
         """GET al endpoint de búsqueda con reintentos para 5xx/429.
 
         Normaliza ambos sabores a la forma de IS (`{"products": [...],
@@ -163,7 +169,7 @@ class VtexAdapter(BaseSourceAdapter):
         en el header `resources` (`items 0-23/357`).
         """
         attempts = max(1, self.config.max_retries)
-        path = self._search_path()
+        path = path or self._search_path()
         last_error: Exception | None = None
         for _ in range(attempts):
             try:
@@ -252,6 +258,51 @@ class VtexAdapter(BaseSourceAdapter):
                 if page * page_size >= total:
                     return
                 page += 1
+
+    # --- refresh ------------------------------------------------------------
+
+    #: Cuantos productos se piden por request. VTEX devuelve como maximo 50 items por
+    #: pagina en el Catalog System, asi que pedir mas seria perder los del final.
+    _REFRESH_BATCH = 50
+
+    def fetch_by_ids(self, request: RefreshRequest) -> Iterator[RawListing]:
+        """Relee publicaciones que ya estan en la base, por `productId`.
+
+        Es el modo que alimenta `price_history`: sin el, cada publicacion tiene un solo
+        punto —el del dia que la trajo una busqueda— y no hay contra que comparar para
+        saber si una oferta bajo de verdad.
+
+        Se usa **siempre el catalogo legacy**, aunque la tienda este configurada con
+        Intelligent Search: el filtro `fq=productId:N` es del Catalog System y funciona en
+        las dos (verificado contra Cetrogar, que corre con IS). IS no tiene un equivalente
+        para pedir por id.
+
+        Los ids se piden de a `_REFRESH_BATCH` repitiendo `fq`, que es como VTEX expresa
+        un OR. Un id que ya no existe simplemente no vuelve en la respuesta, y esa
+        publicacion se queda con su ultimo precio conocido — que es el comportamiento
+        correcto: que una tienda deje de publicar algo no es informacion de precio.
+        """
+        ids = [i for i in request.external_ids if i]
+        if not ids:
+            return
+
+        with self._client() as client:
+            for inicio in range(0, len(ids), self._REFRESH_BATCH):
+                lote = ids[inicio : inicio + self._REFRESH_BATCH]
+                params: list[tuple[str, Any]] = [("fq", f"productId:{pid}") for pid in lote]
+                params += [("_from", 0), ("_to", len(lote) - 1)]
+
+                data = self._get(client, params, path=_LEGACY_PATH)
+                productos: list[JsonDict] = data.get("products") or []
+
+                origin = f"{self._base_url()}{_LEGACY_PATH}?fq=productId:{lote[0]}&+{len(lote) - 1}"
+                for producto in productos:
+                    yield RawListing(
+                        source_slug=self.source_slug,
+                        external_id=str(producto.get("productId", "")),
+                        payload=producto,
+                        origin_ref=origin,
+                    )
 
     # --- normalize (pura) ---------------------------------------------------
 

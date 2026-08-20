@@ -102,28 +102,53 @@ Sin precio no hay nada que comparar. Es el unico dato que Cotejo necesita de una
 
 ---
 
-### 🟡 B. Que los precios se actualicen solos — elegí un camino
+### ✅ B. Que los precios se actualicen solos — HECHO (2026-08-20)
 
-Hoy la ingesta la disparás a mano, así que **los precios son una foto del día que la
-corriste y el gráfico de historial casi no tiene puntos**. Sin esto, la promesa de
-"detectar ofertas que no bajaron nada" no se puede cumplir: no hay con qué comparar.
+`python -m app.workers.daily` refresca los precios de todas las fuentes activas, corre el
+matcher una vez y hace el mantenimiento del cache. Es el trabajo que convierte a Cotejo de
+"una foto del dia que corriste la ingesta" en un comparador con historial.
 
-**Qué es Redis / Upstash, por si no te suena:** Redis es una base de datos en memoria,
-muy rápida. Acá no guardaría productos (eso sigue en Postgres) sino que funcionaría como
-**cola de tareas**: la lista de "traer precios de Frávega a las 9, a las 13 y a las 17".
-Celery es el programa que lee esa cola y ejecuta. Upstash es un Redis alojado, con plan
-gratis de 10.000 comandos por día — muchísimo más de lo que esto necesita.
+```bash
+python -m app.workers.daily                    # todo
+python -m app.workers.daily --dry-run          # que haria, sin tocar nada
+python -m app.workers.daily --only fravega     # una fuente
+python -m app.workers.daily --log-file logs/daily.log   # sin consola
+```
 
-| | Programador de tareas de Windows | Upstash + Celery |
-|---|---|---|
-| Costo | Gratis | Gratis |
-| Configuración tuya | Ninguna, lo hace Claude | Crear cuenta, copiar `REDIS_URL` (5 min) |
-| Sirve en producción | No: solo con tu PC prendida | Sí |
-| Cuándo | **Ahora**, para empezar a juntar historial | Cuando subas el sitio |
+**Ya esta programado en Windows** como tarea "Cotejo - corrida diaria", todos los dias a
+las 9. Corre con `pythonw.exe`, asi que **no abre ninguna ventana**, y deja el log en
+`backend/logs/daily.log`. Una corrida completa tarda ~150 segundos.
 
-**Recomendación:** arrancá hoy con el Programador de Windows para que el historial se
-empiece a llenar, y pasá a Upstash cuando despliegues. Decime *"configurá la tarea
-programada"* y lo hago.
+Para hacerlo andar hubo que implementar el modo refresh, que tres adapters no tenian:
+
+| Fuente | Como se refresca |
+|---|---|
+| Cetrogar, Naldo, OnCity, Easy, Carrefour, Jumbo | `fq=productId:N` del catalogo VTEX, de a 50 por request. Funciona incluso en las tiendas configuradas con Intelligent Search: el filtro es del Catalog System y esta disponible en las dos |
+| Compra Gamer | Gratis: el adapter se baja el catalogo entero igual, refrescar es filtrar en memoria |
+| Fravega | Una request por publicacion, buscando el codigo como palabra clave. Su GraphQL **no tiene filtro por SKU** — se introspecciono el tipo `Filters` y no existe. Por eso hay una pausa de 0,25 s entre requests, y por eso Fravega sola tarda ~160 s |
+| **Megatone** | ⛔ **Sin refresh.** Su buscador (Doofinder) no expone forma de pedir por id. Son 105 publicaciones de 969: la corrida cubre el **89%** del catalogo |
+
+Decisiones que importan:
+
+- **Modo refresh, no busqueda.** Se releen los `external_id` que ya estan en la base. Es
+  lo que alimenta `price_history` sin hacer crecer la base — que es justo lo que el plan
+  gratis no aguanta. El catalogo crece por otro lado: la busqueda en vivo agrega lo que la
+  gente realmente busca.
+- **Una fuente que falla no corta la corrida.** Cada una va en su propio `try` y
+  `run_ingest` confirma antes de pasar a la siguiente, asi que una tienda caida no se
+  lleva puesto lo que ya se refresco.
+- **El matcher corre una sola vez, al final.** Es O(n²): correrlo por fuente seria pagarlo
+  nueve veces.
+- **El mantenimiento va despues**, no antes: primero se escribe el historial del dia y
+  recien despues se aplica la retencion de 90 dias.
+
+Que una publicacion ya no vuelva de la tienda **no la borra ni le cambia el precio**: se
+queda con su ultimo valor conocido. Que un retailer deje de publicar algo no es
+informacion de precio.
+
+**Para produccion** esto mismo se dispara con el cron del hosting (Railway, Render) o con
+Cloudflare Cron Trigger — no hace falta Redis ni Celery. Si algun dia se paraleliza, la
+tarea de Celery va a llamar a este mismo modulo.
 
 ### 🔵 C. Subir el sitio (cuando quieras lanzar)
 
@@ -503,9 +528,10 @@ tarjeta". Necesita una columna nueva en `listing` y tocar la ficha. Conviene hac
 cuando haya una segunda fuente que exponga precios por medio de pago — en el retail
 argentino es habitual, así que va a pasar.
 
-### 6. La evicción no corre sola todavía
-La política existe y funciona, pero hay que dispararla (`python -m app.workers.maintenance`).
-Cuando armemos la ingesta automática (§1-B) va en el mismo cron, una vez por día.
+### 6. ✅ La evicción ya corre sola
+Resuelto el 2026-08-20: va al final de `python -m app.workers.daily`, que la tarea
+programada dispara todos los días. Sigue disponible a mano con
+`python -m app.workers.maintenance`.
 
 ---
 

@@ -94,7 +94,7 @@ class CompraGamerAdapter(BaseSourceAdapter):
 
     kind: ClassVar[SourceKind] = SourceKind.SCRAPER
     capabilities: ClassVar[SourceCapabilities] = SourceCapabilities(
-        supported_modes=frozenset({FetchMode.SEARCH}),
+        supported_modes=frozenset({FetchMode.SEARCH, FetchMode.REFRESH}),
         supports_incremental=False,
         # El catálogo completo se baja SIEMPRE, así que una búsqueda sin término
         # devuelve todo: esta fuente sí soporta el barrido entero.
@@ -237,6 +237,36 @@ class CompraGamerAdapter(BaseSourceAdapter):
                 origin_ref=origin,
             )
             emitted += 1
+
+    def fetch_by_ids(self, request: RefreshRequest) -> Iterator[RawListing]:
+        """Relee publicaciones ya conocidas, por `id_producto`.
+
+        Es gratis en esta fuente: el adapter se baja el catálogo entero igual (una sola
+        request a `/productos`), así que refrescar es filtrar en memoria lo ya descargado.
+
+        A diferencia de `search`, acá **no** se filtra por stock. En una búsqueda, una
+        publicación sin stock no es una oferta real y no debería entrar. Pero en un
+        refresh la publicación ya está en la base: si dejara de emitirla, su precio se
+        congelaría en el último valor conocido sin que nadie se entere. Emitirla deja que
+        el precio del día quede registrado en el historial.
+        """
+        buscados = {str(i) for i in request.external_ids if i}
+        if not buscados:
+            return
+
+        with self._client() as client:
+            catalog = self._load(client)
+
+        origin = f"{self._static_url()}/productos?refresh={len(buscados)}"
+        for item in catalog:
+            product_id = str(item.get("id_producto") or "")
+            if product_id in buscados:
+                yield RawListing(
+                    source_slug=self.source_slug,
+                    external_id=product_id,
+                    payload=item,
+                    origin_ref=origin,
+                )
 
     # --- normalize (pura) ---------------------------------------------------
 
