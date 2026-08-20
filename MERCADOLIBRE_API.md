@@ -166,6 +166,44 @@ Cubierto por `tests/test_ml_token.py` (10 tests, sin red).
 
 ---
 
+## 3c. ⛔ Lo que ML dejo de permitir (verificado 2026-08-20)
+
+**Con el token funcionando, `/sites/MLA/search` responde `403 forbidden`.** No es un
+problema de credenciales: el mismo token entra sin drama a otros endpoints. MercadoLibre
+cerro la busqueda por sitio para aplicaciones comunes.
+
+Probado endpoint por endpoint con un token recien emitido:
+
+| Endpoint | Resultado |
+|---|---|
+| `GET /sites/MLA` | 200 |
+| `GET /sites/MLA/search?q=iphone` | **403 forbidden** |
+| `GET /products/search?site_id=MLA&q=...` | 200 |
+| `GET /items?ids=...` | 200 |
+| `GET /users/me` | 200 |
+
+### Por que `/products/search` no alcanza como reemplazo
+
+Encuentra bien los productos (`Apple iPhone 15 (128 GB) - Verde`), pero devuelve el
+**catalogo**, no publicaciones: sin precio y sin link. Se probo pidiendo el detalle de
+cada producto — `buy_box_winner` viene `null` y `permalink` vacio en todos los casos
+consultados, tanto en celulares como en accesorios.
+
+Sin precio no hay nada que comparar. Es el unico dato que Cotejo necesita de una fuente.
+
+### Que queda
+
+- **La fuente `mercadolibre` no puede alimentar el comparador hoy.** El adapter esta
+  escrito, testeado y funcionando — lo que falta es acceso, no codigo.
+- **El token y su auto-renovacion andan** (§3b). Si ML reabre el acceso, o si consegue
+  permisos por otra via, no hay que tocar nada mas.
+- La via formal para pedir mas acceso es el programa de partners de ML (la app figura
+  como "no certificada"). No esta verificado que lo den para un proyecto personal.
+- **Las otras cinco tiendas no dependen de esto.** Fravega, Cetrogar, Naldo, OnCity,
+  Megatone y Compra Gamer usan sus propias APIs publicas y siguen funcionando.
+
+---
+
 ## 4. Endpoints que usa el adapter (ya implementados)
 
 | Endpoint | Para qué | Auth requerida |

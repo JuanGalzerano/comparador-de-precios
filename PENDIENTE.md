@@ -22,7 +22,7 @@ encuentra. Lo que falta es ponerlo online y que los precios se actualicen solos.
 
 ## 1. Lo que tenés que hacer vos
 
-### 🔴 A. Credenciales de MercadoLibre — 15 minutos
+### ⛔ A. MercadoLibre — cerrado del lado de ML (2026-08-20)
 
 Es el único bloqueo que no puede resolver el código. ML dejó de permitir acceso sin
 autenticación: hoy responde `403` a todo.
@@ -51,8 +51,16 @@ Los pasos exactos del formulario, con las trampas de cada campo, están en
 > había que correr un `curl` cada 6 horas — inviable en producción. `ML_ACCESS_TOKEN`
 > sigue existiendo como override manual para debuggear.
 
-Si el token vence o falla, la fuente no queda marcada como "bloqueada" para siempre: una
-corrida exitosa la reactiva sola.
+**Pero eso ya no alcanza.** Verificado el 2026-08-20 con un token valido: ML responde
+`403 forbidden` en `/sites/MLA/search`, el endpoint del que sale todo. La busqueda de
+catalogo (`/products/search`) si contesta, pero devuelve productos sin precio ni link —
+inservible para un comparador. Detalle completo en `MERCADOLIBRE_API.md` §3c.
+
+**Conclusion: no es una tarea pendiente tuya, es acceso que ML no da.** El adapter, el
+token y la auto-renovacion funcionan. Las otras cinco tiendas no dependen de esto.
+
+Si algun dia reabren el acceso o consegues permisos por el programa de partners, la
+fuente vuelve sola: una corrida exitosa la reactiva.
 
 ### 🟡 B. Que los precios se actualicen solos — elegí un camino
 
