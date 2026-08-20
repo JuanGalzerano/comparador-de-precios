@@ -410,7 +410,7 @@ Estado al 2026-08-20, verificado con requests reales:
 | **Garbarino** | ⛔ Quiebra decretada en marzo 2026. El dominio no resuelve. Cerrado |
 | **Musimundo** | Sitio caído desde el 2026-03-09, catálogo congelado en octubre 2025, empresa en concurso preventivo. Su backend VTEX responde (`musimundo.myvtex.com`, cuenta `musimundo`) pero servir precios de hace 10 meses sería engañoso. Vale un re-check en unos meses: si relanzan, es configuración pura |
 | **Día, Farmacity** | APIs funcionando, pero son almacén y farmacia — poco que comparar con electro |
-| **Jumbo/Disco/Vea** | Misma plataforma. Jumbo ya está; Disco y Vea deberían salir igual |
+| **Disco y Vea** | ⛔ Descartadas a proposito. Son el mismo catalogo que Jumbo: sobre 10 resultados de "heladera", 9 productos son los mismos y **los tres con precio identico**. Cencosud las corre sobre la misma cuenta VTEX y el canal de ventas esta desactivado (`sc is inactive`). Sumarlas haria que una ficha diga "3 tiendas comparadas" mostrando un solo precio tres veces |
 | Rodó, Casa del Audio, Dexter, Solo Deportes, Avenida, Mexx, Philco | 404 en las rutas VTEX. No usan esa plataforma |
 | Full H4rd, Venex, Maximus | 403 o HTML. Sin API accesible |
 
