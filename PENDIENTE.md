@@ -535,6 +535,52 @@ programada dispara todos los días. Sigue disponible a mano con
 
 ---
 
+### 7. 🔴 Las publicaciones descatalogadas muestran un precio congelado
+
+**El problema mas serio abierto hoy.** Encontrado el 2026-08-20 verificando fuente por
+fuente.
+
+Cuando una tienda deja de vender algo, su API simplemente no devuelve mas ese id. El
+refresco diario, entonces, nunca lo actualiza: la publicacion se queda en la base con el
+ultimo precio que se le conocio, para siempre. Y como el orden por defecto es por precio
+ascendente, **un precio viejo tiende a quedar primero**.
+
+Caso concreto, medido:
+
+| | |
+|---|---|
+| Producto | Smart TV 50" 4K JVC LT50DA7125 |
+| Fravega (guardado) | **$109.999**, leido el 2026-08-04 |
+| Fravega (hoy) | el codigo `502147` ya no existe en su API |
+| Naldo (hoy) | $629.999 |
+
+Cotejo muestra ese televisor a $109.999 como la opcion mas barata. El usuario hace clic y
+no encuentra nada. Es exactamente lo que un comparador no puede hacer.
+
+Alcance actual: **137 de 969 publicaciones (14%) llevan mas de 2 dias sin actualizarse.**
+77 son de Megatone, que no soporta refresco y por lo tanto envejece entera por diseño; las
+otras 60 son productos descatalogados de tiendas que si refrescan.
+
+Esto es consecuencia directa de una decision que quedo escrita en §1-B: "una publicacion
+que la tienda deja de devolver se queda con su ultimo precio conocido, porque que un
+retailer deje de publicar algo no es informacion de precio". Eso es cierto por uno o dos
+dias. A los 16 no.
+
+**Propuesta:**
+
+1. Columna `delisted_at` en `listing` (migracion de Alembic).
+2. El worker diario ya sabe cuales pidio y cuales no volvieron: marca la diferencia.
+3. `/search` excluye las marcadas. No se borran: el historial de precios se conserva, y si
+   la tienda vuelve a publicarla, el proximo refresco la limpia.
+4. Megatone necesita tratamiento aparte, porque no puede refrescar: o se le arma un
+   refresco por busqueda del titulo, o se acepta que sus precios envejezcan y se lo
+   declara en `/como-funciona`.
+
+Lo que **no** hay que hacer es un filtro por `fetched_at` a secas: se llevaria puestas las
+105 publicaciones de Megatone, que estan bien pero no se pueden releer.
+
+---
+
 ## 6. Lo que ya está hecho
 
 Para no volver a pedirlo:
