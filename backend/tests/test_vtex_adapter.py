@@ -251,3 +251,68 @@ def test_health_check_down_on_500():
     respx.get(IS_URL).mock(return_value=httpx.Response(500))
     status = _adapter().health_check()
     assert not status.ok
+
+
+# ---------------------------------------------------------------------------
+# Precio: gana la oferta del seller sobre el agregado de Intelligent Search
+# ---------------------------------------------------------------------------
+
+
+def _producto_con_dos_precios(agregado: int, oferta: float | int) -> dict:
+    """Producto donde `priceRange` y la oferta del seller NO coinciden."""
+    p = _product(price=agregado)
+    p["items"] = [{"sellers": [{"commertialOffer": {"Price": oferta, "ListPrice": agregado}}]}]
+    return p
+
+
+def test_precio_toma_la_oferta_del_seller_no_el_agregado():
+    """`priceRange` no aplica las reglas de precio del vendedor.
+
+    Caso real (Easy, heladera Drean HDR280F50B, 2026-08-20): el agregado decia 734.995
+    y la oferta 661.495, y la ficha del producto declaraba
+    `product:price:amount = 661495.5`. Tomando el agregado, la tienda aparecia $73.500
+    mas cara de lo que estaba y no podia ganar una comparacion nunca.
+    """
+    adapter = VtexAdapter(source_slug="easy", config={"base_url": BASE})
+    raw = RawListing(
+        source_slug="easy",
+        external_id="12345",
+        payload=_producto_con_dos_precios(agregado=734_995, oferta=661_495.5),
+        origin_ref="test",
+    )
+
+    normalizado = adapter.normalize(raw)
+
+    assert normalizado.price == Decimal("661495.5")
+
+
+def test_precio_cae_al_agregado_cuando_el_seller_no_tiene_oferta():
+    """`Price: 0` es "sin oferta activa" (seller sin stock), no un producto gratis.
+
+    Cetrogar devuelve eso en publicaciones sin stock mientras `priceRange` sigue
+    trayendo el precio real de la ficha.
+    """
+    adapter = VtexAdapter(source_slug="cetrogar", config={"base_url": BASE})
+    raw = RawListing(
+        source_slug="cetrogar",
+        external_id="12345",
+        payload=_producto_con_dos_precios(agregado=694_449, oferta=0),
+        origin_ref="test",
+    )
+
+    normalizado = adapter.normalize(raw)
+
+    assert normalizado.price == Decimal("694449")
+
+
+def test_precio_usa_el_agregado_cuando_no_hay_sellers():
+    """El Catalog System legacy a veces no trae `sellers`."""
+    adapter = VtexAdapter(source_slug="naldo", config={"base_url": BASE})
+    raw = RawListing(
+        source_slug="naldo",
+        external_id="12345",
+        payload=_product(price=636_999),
+        origin_ref="test",
+    )
+
+    assert adapter.normalize(raw).price == Decimal("636999")

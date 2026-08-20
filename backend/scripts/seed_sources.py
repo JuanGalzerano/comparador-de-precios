@@ -43,6 +43,57 @@ SOURCES: list[dict] = [
         "tos_risk_note": None,
     },
     {
+        "slug": "jumbo",
+        "display_name": "Jumbo",
+        "kind": SourceKind.VTEX,
+        "status": SourceStatus.ACTIVE,
+        # `legacy_catalog` porque su Intelligent Search esta desplegado pero con el
+        # indice vacio: contesta 200 con `recordsFiltered: 0` para cualquier termino,
+        # incluso "leche". La busqueda real del sitio corre por el catalogo legacy.
+        #
+        # `fq=C:/15/` acota al arbol de Electro. Es imprescindible: Jumbo publica
+        # 325.794 productos y solo 19.833 son de electro; el resto es almacen, que no
+        # entra en el alcance del comparador ni en una base de 500 MB.
+        # Subcategorias: 113 TV · 114 Aire · 115 Audio · 117 Cocinas · 120 Heladeras ·
+        # 121 Informatica · 122 Lavado · 124 Telefonos.
+        "config_json": {
+            "base_url": "https://www.jumbo.com.ar",
+            "api_flavor": "legacy_catalog",
+            "search_filters": {"fq": "C:/15/"},
+        },
+        "tos_risk_note": None,
+    },
+    {
+        "slug": "carrefour",
+        "display_name": "Carrefour",
+        "kind": SourceKind.VTEX,
+        "status": SourceStatus.ACTIVE,
+        # `legacy_catalog` a proposito, aunque Carrefour tenga Intelligent Search: su
+        # admin tiene reglas de redirect para terminos genericos de una palabra
+        # ("notebook", "televisor"), que en IS devuelven `products: []` mas un campo
+        # `redirect` a una categoria. El catalogo legacy no las aplica y contesta los
+        # 1220 resultados. Verificado 2026-08-20.
+        #
+        # Trae ademas su marketplace en la misma respuesta: los vendedores terceros se
+        # distinguen por `sellerId` con prefijo `Producteca`.
+        "config_json": {
+            "base_url": "https://www.carrefour.com.ar",
+            "api_flavor": "legacy_catalog",
+        },
+        "tos_risk_note": None,
+    },
+    {
+        "slug": "easy",
+        "display_name": "Easy",
+        "kind": SourceKind.VTEX,
+        "status": SourceStatus.ACTIVE,
+        # Verificado 2026-08-20: Intelligent Search responde 200 con precio, precio de
+        # lista, marca, link, stock y cuotas. Suma linea blanca y herramientas, un
+        # segmento que las otras cinco tiendas cubren poco.
+        "config_json": {"base_url": "https://www.easy.com.ar"},
+        "tos_risk_note": None,
+    },
+    {
         "slug": "naldo",
         "display_name": "Naldo",
         "kind": SourceKind.VTEX,

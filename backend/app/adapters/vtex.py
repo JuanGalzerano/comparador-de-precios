@@ -29,6 +29,8 @@ from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar
 
+from urllib.parse import quote, urlencode
+
 import httpx
 from pydantic import ValidationError
 
@@ -122,8 +124,20 @@ class VtexAdapter(BaseSourceAdapter):
         if self._flavor() == FLAVOR_LEGACY_CATALOG:
             offset = (page - 1) * page_size
             # El Catalog System pagina por rango inclusivo de índices, no por nro. de página.
-            return {"ft": term, "_from": offset, "_to": offset + page_size - 1}
-        return {"query": term, "count": page_size, "page": page}
+            params: dict[str, Any] = {"ft": term, "_from": offset, "_to": offset + page_size - 1}
+        else:
+            params = {"query": term, "count": page_size, "page": page}
+
+        # `search_filters` de `config_json`: parametros extra que acotan la busqueda a
+        # una parte del catalogo. Existe para las cadenas de supermercado, donde el
+        # rubro que nos interesa es una fraccion minima del total — Jumbo publica
+        # 325.794 productos y solo 19.833 son de electro. Sin esto, una ingesta se
+        # llevaria el almacen entero a una base de 500 MB.
+        # Ejemplo: {"fq": "C:/15/"} (arbol de categorias de VTEX).
+        extra = getattr(self.config, "search_filters", None)
+        if isinstance(extra, dict):
+            params.update(extra)
+        return params
 
     def _client(self) -> httpx.Client:
         headers: dict[str, str] = {
@@ -153,7 +167,12 @@ class VtexAdapter(BaseSourceAdapter):
         last_error: Exception | None = None
         for _ in range(attempts):
             try:
-                response = client.get(path, params=params)
+                # La query se arma a mano para que el espacio viaje como `%20` y no
+                # como `+`. httpx usa `+` (codificacion de formulario), y el WAF de
+                # Carrefour responde `400 Bad Request! Scripts are not allowed!` a
+                # cualquier `ft` que lo contenga — "notebook" pasaba y "smart tv" no.
+                # `%20` es valido en todos lados; `+` solo dentro de un form.
+                response = client.get(f"{path}?{urlencode(params, quote_via=quote)}")
             except httpx.TimeoutException as exc:
                 last_error = SourceUnavailable(
                     f"timeout en IS: {exc}", source_slug=self.source_slug
@@ -257,11 +276,22 @@ class VtexAdapter(BaseSourceAdapter):
 
         offer = _first_offer(p)
 
-        # IS trae el precio agregado en `priceRange`; el Catalog System solo lo trae
-        # dentro de la oferta del primer seller disponible.
-        raw_price = ((p.get("priceRange") or {}).get("sellingPrice") or {}).get("lowPrice")
+        # Precio: gana la oferta del seller, no el `priceRange` que arma Intelligent
+        # Search. Los dos coinciden en la mayoria de las tiendas, pero cuando difieren
+        # el bueno es el del seller: `priceRange` es un agregado que NO aplica las
+        # reglas de precio del vendedor.
+        #
+        # Verificado el 2026-08-20 con una heladera Drean HDR280F50B: Easy devolvia
+        # `priceRange` 734.995 y oferta 661.495, y su propia ficha declara
+        # `product:price:amount = 661495.5` en el Open Graph — o sea, el precio que ve
+        # quien entra es el del seller. Con el agregado, Easy aparecia $73.500 mas cara
+        # de lo que esta y no podia ganar una comparacion nunca.
+        #
+        # `Price` en 0 significa "sin oferta activa" (seller sin stock), no gratis: en
+        # ese caso se cae al agregado, que sigue siendo un precio real de la ficha.
+        raw_price = offer.get("Price") or None
         if raw_price is None:
-            raw_price = offer.get("Price")
+            raw_price = ((p.get("priceRange") or {}).get("sellingPrice") or {}).get("lowPrice")
         if raw_price is None:
             raise NormalizationError(
                 f"item {external_id} sin sellingPrice",
