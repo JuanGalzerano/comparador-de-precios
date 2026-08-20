@@ -312,7 +312,12 @@ class NormalizedListingInput(BaseModel):
     condition: ItemCondition = ItemCondition.UNKNOWN
 
     # --- Precio ------------------------------------------------------------
-    price: Decimal = Field(ge=0)
+    #: `gt=0` y no `ge=0`: una tienda que publica precio 0 no esta regalando el producto,
+    #: esta diciendo "sin precio" (tipicamente sin stock). Aceptarlo lo convierte en el
+    #: mas barato del grupo y el comparador anuncia un ahorro inventado — se vio con una
+    #: RTX 5060 Ti de Cetrogar en $0 que ofrecia "ahorras hasta $1.506.799".
+    #: El worker descarta el item y sigue: una publicacion rara no aborta la corrida.
+    price: Decimal = Field(gt=0)
     #: 0 = envio gratis confirmado; `None` = la fuente no informa. La distincion importa:
     #: `scoreOf()` premia con 0.3 el envio en 0, y no seria honesto premiar un desconocido.
     shipping_cost: Decimal | None = Field(default=None, ge=0)
