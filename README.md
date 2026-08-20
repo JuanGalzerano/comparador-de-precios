@@ -20,9 +20,15 @@ Plan completo de arquitectura y roadmap: `C:\Users\juani\.claude\plans\ahora-hac
 | **Frávega** | ✅ Activa | API GraphQL pública del propio sitio (`/api/v2`). |
 | **Cetrogar** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
 | **Naldo** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
-| **MercadoLibre** | ⛔ Cerrada | ML dejó de dar acceso a la búsqueda: con un token válido, `/sites/MLA/search` responde 403. El adapter, el token y su renovación funcionan — lo que falta es acceso, y no depende de nosotros (ver `PENDIENTE.md`). |
-| **Precios Claros / SEPA** (dato oficial del gobierno argentino) | ⏳ Evaluando viabilidad | El Estado obliga a grandes cadenas a publicar precios en archivos diarios. Falta confirmar si las cadenas de electro/tecnología realmente reportan ahí antes de construir el importer. |
-| **Musimundo, Garbarino, Compumundo y otras** | ❌ No integradas todavía | No tienen API pública accesible. Si en algún momento se suman, va a ser con scraping propio (servidor propio, nunca con la computadora del visitante — ver más abajo) y con aprobación explícita retailer por retailer. |
+| **OnCity** | ✅ Activa | Catálogo VTEX clásico (`catalog_system`). |
+| **Megatone** | ✅ Activa | Buscador Doofinder del propio sitio. |
+| **Compra Gamer** | ✅ Activa | Catálogo estático público. Cubre tecnología y gaming. Su precio destacado **incluye 10% de descuento por transferencia**. |
+| **Easy** | ✅ Activa | VTEX Intelligent Search. Suma línea blanca y herramientas. |
+| **Carrefour** | ✅ Activa | Catálogo VTEX clásico. Trae también su marketplace de vendedores terceros. |
+| **Jumbo** | ✅ Activa | Catálogo VTEX clásico, acotado al árbol de electro (`fq=C:/15/`) para no traer el almacén. |
+| **MercadoLibre** | ⛔ Cerrada | ML dejó de dar acceso a la búsqueda: con un token válido, `/sites/MLA/search` responde 403. El adapter, el token y su renovación funcionan — lo que falta es acceso, y no depende de nosotros. |
+| **Precios Claros / SEPA** | ❌ Descartada | Se midió: Coto y Jumbo reportan ahí cero televisores y cero notebooks. Es casi todo alimentos. |
+| **Coto, ChangoMás, Tiendamia y otras** | ⏳ Investigadas | Cada una con su motivo y su próximo paso en `PENDIENTE.md` §4-H. |
 
 El estado y la competitividad de cada fuente se sirven en vivo en `GET /sources` y se
 muestran en `/como-funciona`.
@@ -57,7 +63,7 @@ actual. Todo el scraping, si se hace, corre en servidores propios.
 
 - ✅ Modelo de datos (Postgres/SQLite) y arquitectura de adapters por fuente.
 - ✅ Adapters de Frávega, Cetrogar, Naldo y MercadoLibre, con score testeado.
-- ✅ Ingesta con datos reales: ~335 publicaciones de 3 tiendas.
+- ✅ Ingesta con datos reales: ~950 publicaciones de 9 tiendas.
 - ✅ Matcher cross-retailer: el mismo producto de distintas tiendas cae en un solo cluster.
 - ✅ Frontend Next.js: búsqueda, ficha comparativa, historial de precios, favoritos,
   cuenta de usuario, `/como-funciona`.

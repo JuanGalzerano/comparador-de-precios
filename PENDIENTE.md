@@ -207,9 +207,9 @@ Medido sobre los datos reales del proyecto, no estimado:
 | **Neon** | 512 MB | ~1.000.000 |
 | **Supabase** | 500 MB | ~1.000.000 |
 
-**Un millón de publicaciones entra en el plan gratis.** Hoy tenés ~500, y crecen solas
+**Un millón de publicaciones entra en el plan gratis.** Hoy tenés ~950, y crecen solas
 con cada búsqueda nueva (§3). El catálogo entero
-de las tres tiendas son decenas de miles, no millones. **El catálogo no es el problema.**
+de las tiendas integradas son decenas de miles, no millones. **El catálogo no es el problema.**
 
 ### El problema real es el historial de precios
 
@@ -246,7 +246,7 @@ Se borra lo peor primero: menos accesos y, a igualdad, más viejo. Y borrar no p
 nada: si mañana alguien lo busca, vuelve de las tiendas en ~2 segundos.
 
 **La capa 3 es la que garantiza que el sitio nunca deje de funcionar.** Verificado
-simulando la base al 95%: consulta las tres tiendas, devuelve 25 resultados y escribe
+simulando la base al 95%: consulta las tiendas, devuelve 25 resultados y escribe
 cero. Se degrada a "buscador en tiempo real" — más lento, nunca roto.
 
 Para ver cuánto espacio queda:
@@ -399,12 +399,70 @@ levanta excepción y espera 60 s antes de reintentar si ML rechaza las credencia
 Para que el link se vea bien al compartirlo. Necesita una decisión de diseño tuya.
 
 ### H. Adapters nuevos
+Estado al 2026-08-20, verificado con requests reales:
+
 | Tienda | Estado |
 |---|---|
-| Musimundo | Sin API pública accesible en la última revisión |
-| Garbarino | El dominio no resolvía |
-| Megatone, Rodó, Casa del Audio | Probadas: no exponen API VTEX estándar |
-| Mexx, Ribeiro | Sin investigar |
+| **Easy, Carrefour, Jumbo** | ✅ Integradas. VTEX, solo configuración |
+| **Coto** | Migró a Constructor.io (`key_r6xzz4IAoTWcipni`). Necesita adapter nuevo, ~1 día. A cambio: 4.911 productos de electro, con descuentos y cuotas ya en el payload, y filtro por categoría (`catv00001990` = Electro) |
+| **ChangoMás** | VTEX puro, sin bloqueo, trae EAN. Integrable en 5 minutos — **pero sus términos prohíben el deep-linking sin permiso escrito** (cláusula 18). Decisión legal pendiente |
+| **Tiendamia** | Bloqueada por Cloudflare. Ver §4-H |
+| **Garbarino** | ⛔ Quiebra decretada en marzo 2026. El dominio no resuelve. Cerrado |
+| **Musimundo** | Sitio caído desde el 2026-03-09, catálogo congelado en octubre 2025, empresa en concurso preventivo. Su backend VTEX responde (`musimundo.myvtex.com`, cuenta `musimundo`) pero servir precios de hace 10 meses sería engañoso. Vale un re-check en unos meses: si relanzan, es configuración pura |
+| **Día, Farmacity** | APIs funcionando, pero son almacén y farmacia — poco que comparar con electro |
+| **Jumbo/Disco/Vea** | Misma plataforma. Jumbo ya está; Disco y Vea deberían salir igual |
+| Rodó, Casa del Audio, Dexter, Solo Deportes, Avenida, Mexx, Philco | 404 en las rutas VTEX. No usan esa plataforma |
+| Full H4rd, Venex, Maximus | 403 o HTML. Sin API accesible |
+
+**Precios Claros / SEPA quedó descartado con datos:** se midió que Coto y Jumbo reportan
+ahí **cero televisores y cero notebooks**. Ni siquiera Frávega reporta TVs. Es casi todo
+alimentos — no es una vía para electro.
+
+---
+
+### H. Tiendamia — bloqueada por Cloudflare (2026-08-20)
+
+Investigada a fondo porque tiene mucho catalogo. **No se integro**, y el motivo final es
+tecnico, no de diseno: despues de un rato de consultas, Cloudflare empezo a devolver
+`403` con `cf-mitigated: challenge` a **todo el sitio** (la home incluida) desde cualquier
+User-Agent, incluido uno de Chrome completo. Solo pasa `robots.txt`.
+
+Pasar ese desafio significa evadir deteccion de bots. No se hace: es la linea que el
+proyecto ya decidio no cruzar, y ademas se arriesga a que bloqueen la IP del servidor.
+
+Lo que se averiguo antes del bloqueo, por si algun dia se retoma:
+
+| Punto | Hallazgo |
+|---|---|
+| API oficial | No existe. `api.tiendamia.com` solo sirve el historial del autocomplete |
+| Plataforma | Magento 2, buscador propio, resultados renderizados en el servidor |
+| GraphQL | Expuesto pero con el catalogo vacio (`total_count: 0`) y prohibido por `robots.txt` |
+| Ruta util | `GET /search/{vendor}/{termino}` con vendor en `amazon`, `ebay`, `china` |
+| Paginacion | Cuarto segmento del path, en base64: `cGFnZSUzRDI=` = `page%3D2`. El `?page=N` se ignora |
+| Datos por producto | Atributos `data-sku`, `data-price` (USD), `data-list-price`, `data-discount`, mas marca, titulo, link e imagen. No hace falta navegador headless |
+| `robots.txt` | **Permite** `/search/` y `/p/`; prohibe `/api/`, `/graphql/`, `/rest/` |
+| Terminos | Sin clausula anti-automatizacion: cero menciones de scraping, robots, crawlers o mineria de datos en 92.000 caracteres |
+
+**El precio de Tiendamia no es comparable con el de un retailer local, y no por un
+porcentaje fijo.** Verificado con aritmetica: en una misma pagina de resultados, un
+cuaderno de USD 6,59 y una notebook de USD 469,84 salen ambos multiplicados por
+**1770,48** exactos. Un precio con envio incluido no puede ser un multiplo fijo, porque el
+envio depende del peso. Es el precio del producto en dolares, a una cotizacion propia
+~17% arriba del oficial.
+
+Lo que falta encima: envio internacional (variable por peso) mas impuestos de aduana, que
+dependen del **historial de compras del usuario** — hay 12 franquicias anuales de USD 50 y,
+pasado el cupo, 50% sobre el costo. No hay forma de declarar esa brecha como un numero.
+
+Decision tomada: si algun dia se integra, va igual en la comparacion principal (decision
+del 2026-08-20), pero **con la etiqueta visible en la ficha** aclarando que el precio no
+incluye envio ni impuestos de importacion — el mismo criterio que se uso con el descuento
+por transferencia de Compra Gamer.
+
+Vias legitimas para retomarla: esperar y reintentar desde otra IP (el desafio parece de
+reputacion, no permanente), o pedir acceso por su programa de afiliados
+(`affiliateprogram.tiendamia.com`), que seria la via limpia y ademas monetizable.
+
 
 ---
 
@@ -455,9 +513,8 @@ Cuando armemos la ingesta automática (§1-B) va en el mismo cron, una vez por d
 
 Para no volver a pedirlo:
 
-- ✅ **Seis tiendas con datos reales**: Frávega, Cetrogar, Naldo, OnCity, Megatone y
-  Compra Gamer (esta última cubre tecnología/gaming). La base crece sola con cada
-  búsqueda nueva.
+- ✅ **Nueve tiendas con datos reales**: Frávega, Cetrogar, Naldo, OnCity, Megatone,
+  Compra Gamer, Easy, Carrefour y Jumbo. La base crece sola con cada búsqueda nueva.
 - ✅ **Similares**: los modelos parecidos se muestran aparte de la comparación estricta,
   para que el "ahorrás hasta X" no compare productos distintos.
 - ✅ **Matching entre tiendas**: 50 productos comparables entre 2 y 3 tiendas.
