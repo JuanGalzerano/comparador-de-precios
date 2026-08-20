@@ -11,21 +11,63 @@ funcione con datos reales.
 
 ## 1. Registrar una aplicación en el portal de desarrolladores
 
-1. Ir a **https://developers.mercadolibre.com.ar**
-2. Loguearse con una cuenta de MercadoLibre (la tuya personal sirve).
-3. Ir a **"Mis aplicaciones"** → **"Crear aplicación"**.
-4. Completar:
-   - **Nombre:** `cotejo-dev` (o cualquier nombre)
-   - **Descripción breve:** `Comparador de precios`
-   - **Dominio:** `localhost` (para desarrollo)
-   - **URI de redirección:** `http://localhost:8000/auth/ml/callback`
-     (se usa para el flujo Authorization Code — ver §3)
-   - **Permisos/Scopes:** `read` alcanza para leer búsquedas y detalles.
-5. Al guardar, ML te da:
-   - `client_id` — número largo (ej. `1234567890123456`)
-   - `client_secret` — string alfanumérico
+Verificado contra el formulario real el **2026-08-20** — el portal cambió respecto de lo
+que documentaban las versiones anteriores de este archivo.
 
-Guardarlos en `backend/.env`:
+1. Ir a **https://developers.mercadolibre.com.ar** → **Mis aplicaciones** →
+   **Crear nueva aplicación**.
+
+2. **Información básica:**
+
+   | Campo | Valor |
+   |---|---|
+   | Nombre | `Cotejo - comparador de precios` |
+   | Nombre corto | `cotejo` (va en la URL: sin espacios ni acentos) |
+   | Descripción | `Comparador de precios de electro y tecnologia en Argentina` |
+   | Propósito | Personal |
+   | Cantidad de usuarios | el rango más chico |
+   | Logo | opcional |
+
+3. **Flujos OAuth: dejar tildado solo `Client Credentials`.** Destildar
+   `Authorization Code` y `Refresh Token`.
+
+   > Esto importa por dos motivos. Primero, **el campo "Redirect URIs" es obligatorio
+   > por culpa de Authorization Code**, y ML **rechaza `localhost`** ahí (con http y con
+   > https): exige un dominio público. Destildando el flujo, el campo deja de pedirse.
+   > Segundo, si dejás Authorization Code tildado, el token que devuelve Client
+   > Credentials viene con scopes de más — se vio `offline_access`, `write` y
+   > `urn:global:admin:users:/read-write` en un token que solo tenía que leer catálogo.
+   >
+   > Si por lo que sea necesitás llenar Redirect URIs, poné cualquier HTTPS público
+   > (no `localhost`). **Nunca se usa** con Client Credentials, y se puede editar después
+   > sin que cambien `client_id` ni `client_secret`. En el backend **no existe** ninguna
+   > ruta `/auth/ml/callback`.
+
+4. **PKCE:** destildado. Solo aplica a Authorization Code.
+
+5. **Permisos:** todo en `Sin acceso`. Cotejo solo lee catálogo público (búsquedas,
+   ítems, vendedores, reseñas) y eso no necesita ninguno. Si el desplegable de alguno no
+   ofrece "Sin acceso", elegir **`Lectura`**, nunca "Lectura y escritura". El permiso
+   "Usuarios" aparece fijo en gris: no se puede cambiar.
+
+6. **Tópicos:** ninguno. Son webhooks para vendedores — ML avisa de cambios en *tu*
+   cuenta, no del catálogo global, y necesitan una URL pública que reciba los POST. El
+   backend no tiene ese endpoint ni lo necesita: el modelo es pull (la ingesta consulta
+   cada X horas), no push.
+
+7. Al guardar, la app queda como **"Aplicación no certificada"**. Está bien: la
+   certificación es del programa de partners, para apps que operan sobre cuentas de
+   terceros. No aplica.
+
+8. Las credenciales quedan en la tarjeta de la app. El **Client ID** se ve directo; el
+   **Client Secret** está detrás del menú **⋮** de la tarjeta. Si ML no lo muestra
+   (solo lo revela al crear la app), usar **Restablecer Client Secret** — el `client_id`
+   no cambia.
+
+   - **Client ID**: identificador público, 16 dígitos. Viaja en cada request, no es secreto.
+   - **Client Secret**: la contraseña de la app. No se commitea ni se comparte.
+
+Guardarlos en `backend/.env` (ver §3a):
 
 ```env
 ML_CLIENT_ID=1234567890123456
@@ -73,98 +115,54 @@ cuenta. **No es necesario ahora** — el comparador solo lee datos públicos.
 
 ---
 
-## 3. Poner el token en el adapter
+## 3. Poner las credenciales en el backend
 
-> **✅ Los pasos 3b y 3c YA ESTÁN HECHOS en el código** (verificado 2026-08-04).
-> `app/config.py` declara `ml_access_token` / `ml_client_id` / `ml_client_secret`, y tanto
-> `MercadoLibreAdapter._client()` como la búsqueda en vivo de `/search` inyectan el header
-> `Authorization`. **Solo tenés que hacer el paso 3a** (poner la variable en `.env`) y
-> reiniciar. Se dejan documentados para entender qué hace el código.
+> **✅ Todo lo de esta sección ya está implementado** (auto-renovación incluida,
+> 2026-08-20). Lo único que hacés vos es el paso 3a.
 
 ### 3a. En `backend/.env`
 
-Agregar el token obtenido en §2a directamente (para desarrollo rápido):
+Con el `client_id` y el `client_secret` de §1 alcanza — **el token se pide y se renueva
+solo**:
 
 ```env
 ML_CLIENT_ID=1234567890123456
 ML_CLIENT_SECRET=AbCdEfGhIjKlMnOpQrStUv
-ML_ACCESS_TOKEN=APP_USR-1234...
 ```
 
-### 3b. Cambios en `app/config.py`
+`ML_ACCESS_TOKEN` quedó como override manual opcional: si lo ponés, gana sobre la
+renovación automática, pero vence a las 6 horas y no se renueva. Sirve para debuggear.
 
-Agregar los tres campos nuevos a `Settings`:
+El `.env` está en `.gitignore` y vive solo en el servidor: nunca viaja al navegador.
+El `client_secret` es una contraseña — no se commitea ni se pega en un chat.
 
-```python
-# --- MercadoLibre OAuth ------------------------------------------------
-ml_client_id: str | None = None
-ml_client_secret: str | None = None
-ml_access_token: str | None = None
-```
+### 3b. Cómo funciona la renovación — `app/services/ml_token.py`
 
-### 3c. Cambios en `app/adapters/mercadolibre.py`
+`get_token()` es la única puerta de entrada. Lo usan `MercadoLibreAdapter._client()` y la
+búsqueda en vivo de `/search`.
 
-En `_client()`, inyectar el token como header `Authorization`:
+| Situación | Qué hace |
+|---|---|
+| Hay `ML_ACCESS_TOKEN` | Lo devuelve tal cual (override manual) |
+| Hay token cacheado y vigente | Lo devuelve sin tocar la red |
+| Cacheado vencido, o no hay | Pide uno nuevo con Client Credentials y lo cachea |
+| No hay credenciales | Devuelve `None` |
+| ML rechaza / no hay red | Devuelve `None`, reintenta recién en 60 s |
 
-```python
-def _client(self) -> httpx.Client:
-    headers = dict(self.config.headers)
-    if self.config.user_agent:
-        headers.setdefault("User-Agent", self.config.user_agent)
+Cuatro decisiones que importan:
 
-    # Inyectar Bearer token si está configurado
-    token = settings.ml_access_token
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+- **Margen de 5 minutos** antes del vencimiento real. Un token que vence en 30 segundos
+  no le sirve a una ingesta que tarda minutos, y el reloj del server puede estar corrido.
+- **Thread-safe.** Los adapters corren en un `ThreadPoolExecutor`; sin `Lock`, N hilos que
+  ven el token vencido piden N tokens a la vez.
+- **Nunca levanta excepción.** Una falla de auth de una tienda no puede tumbar una
+  búsqueda que las otras cinco pueden contestar: degrada a `None` y ML queda vacía.
+- **Backoff de 60 s tras una falla.** Si las credenciales son malas, no mejoran en 200 ms;
+  reintentar en cada request sería pegarle a ML para nada.
 
-    kwargs: dict[str, Any] = dict(
-        base_url=self._base_url(),
-        timeout=self.config.timeout_seconds,
-        headers=headers,
-    )
-    if self.config.proxy_url:
-        kwargs["proxy"] = self.config.proxy_url
-    return httpx.Client(**kwargs)
-```
+`invalidate()` descarta el token cacheado, para llamar si ML devuelve 401/403.
 
-Nada más cambia — el resto del adapter ya funciona correctamente.
-
-### 3d. Auto-renovación del token (opcional, para producción)
-
-El token dura 6 horas. Para no tener que renovarlo a mano, agregar un helper
-que lo renueve automáticamente cuando está por vencer:
-
-```python
-# app/adapters/mercadolibre_token.py
-import time
-import httpx
-from app.config import settings
-
-_cached: dict = {}
-
-def get_access_token() -> str:
-    now = time.time()
-    if _cached.get("token") and _cached.get("expires_at", 0) - now > 300:
-        return _cached["token"]
-
-    resp = httpx.post(
-        "https://api.mercadolibre.com/oauth/token",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": settings.ml_client_id,
-            "client_secret": settings.ml_client_secret,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    _cached["token"] = data["access_token"]
-    _cached["expires_at"] = now + data["expires_in"]
-    return _cached["token"]
-```
-
-Luego en `_client()` usar `get_access_token()` en vez de `settings.ml_access_token`.
+Cubierto por `tests/test_ml_token.py` (10 tests, sin red).
 
 ---
 
@@ -201,24 +199,27 @@ suficientes para cientos de productos.
 ## 6. Pasos concretos para activar (checklist)
 
 ```
-[ ] 1. Crear app en developers.mercadolibre.com.ar
+[ ] 1. Crear app en developers.mercadolibre.com.ar (solo flujo Client Credentials)
 [ ] 2. Copiar client_id y client_secret → backend/.env
-[ ] 3. Ejecutar el curl de §2a → copiar access_token → backend/.env
-[x] 4. Agregar ml_access_token a app/config.py Settings              (YA HECHO)
-[x] 5. Inyectar el header Authorization en el adapter y en /search   (YA HECHO)
+[x] 3. Agregar los campos a app/config.py Settings                   (YA HECHO)
+[x] 4. Inyectar el header Authorization en el adapter y en /search   (YA HECHO)
+[x] 5. Auto-renovacion del token (app/services/ml_token.py)          (YA HECHO)
 [ ] 6. Reiniciar el backend
 [ ] 7. Correr: python -m app.workers.ingest mercadolibre --term "iphone 13" --max-results 20
 [ ] 8. Verificar que GET /search?q=iphone devuelve resultados con permalinks reales
-[ ] 9. (Prod) Implementar auto-renovación del token (§3d) o un cron que lo renueve cada 5h
 ```
+
+Ya no hace falta el paso de pedir el `access_token` con `curl`: con `client_id` y
+`client_secret` en el `.env`, el backend lo pide solo. El `curl` de §2a queda como forma
+de comprobar a mano que las credenciales andan.
 
 Verificado contra el código (2026-08-04):
 
 - La fuente `mercadolibre` está hoy en estado `blocked_tos_review` porque la API responde
   403. **Eso NO impide correr la ingesta**: el worker resuelve la fuente por slug, sin
   mirar el estado — y una corrida exitosa ahora la reactiva sola.
-- ML devuelve **403 tanto si te bloqueó como si se venció el token** (dura 6 horas). Por
-  eso el paso 9 importa: sin auto-renovación, cada 6 horas la ingesta vuelve a fallar.
+- ML devuelve **403 tanto si te bloqueó como si se venció el token** (dura 6 horas). Eso
+  ya no obliga a nada manual: desde 2026-08-20 el token se renueva solo (§3b).
 - La búsqueda en vivo de `/search` (`_ml_live_search`) **antes no mandaba el token**, así
   que iba a seguir devolviendo vacío aun con el token bien configurado. Corregido.
 

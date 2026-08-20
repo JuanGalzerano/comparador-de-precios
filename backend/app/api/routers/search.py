@@ -36,13 +36,13 @@ from fastapi import APIRouter, Query
 from sqlalchemy import ColumnElement, func, or_, select
 
 from app.api.deps import DbSession
-from app.config import settings
 from app.enums import ItemCondition
 from app.models.listing import Listing
 from app.models.product import Product
 from app.models.retailer_source import RetailerSource
 from app.scoring.score import score_listings
 from app.schemas.search import ProductClusterOut, SearchResponse
+from app.services import ml_token
 from app.services.live_search import fetch_live, should_fetch
 from app.services.maintenance import touch_products
 
@@ -80,9 +80,9 @@ def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
     """
     headers = {"Accept": "application/json"}
     # La API de ML pasó a exigir OAuth: sin token responde 403 y esta funcion devuelve
-    # vacio. Ver MERCADOLIBRE_API.md.
-    if settings.ml_access_token:
-        headers["Authorization"] = f"Bearer {settings.ml_access_token}"
+    # vacio. El token se obtiene y renueva solo. Ver MERCADOLIBRE_API.md.
+    if token := ml_token.get_token():
+        headers["Authorization"] = f"Bearer {token}"
 
     try:
         with httpx.Client(timeout=_ML_TIMEOUT) as client:

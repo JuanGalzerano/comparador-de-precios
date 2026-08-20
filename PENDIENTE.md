@@ -22,34 +22,37 @@ encuentra. Lo que falta es ponerlo online y que los precios se actualicen solos.
 
 ## 1. Lo que tenés que hacer vos
 
-### 🔴 A. Token de MercadoLibre — 15 minutos
+### 🔴 A. Credenciales de MercadoLibre — 15 minutos
 
 Es el único bloqueo que no puede resolver el código. ML dejó de permitir acceso sin
 autenticación: hoy responde `403` a todo.
 
-1. Entrá a **https://developers.mercadolibre.com.ar** con tu cuenta de ML.
-2. **Crear aplicación**: nombre `cotejo-dev`, dominio `localhost`, redirect URI
-   `http://localhost:8000/auth/ml/callback`, scope `read`.
-3. Copiá `client_id` y `client_secret`.
-4. Pedí el token:
-   ```bash
-   curl -X POST https://api.mercadolibre.com/oauth/token -H "content-type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=TU_CLIENT_ID&client_secret=TU_CLIENT_SECRET"
+1. Entrá a **https://developers.mercadolibre.com.ar** → **Mis aplicaciones** →
+   **Crear nueva aplicación**.
+2. **Dejá tildado solo el flujo `Client Credentials`.** Destildá `Authorization Code` y
+   `Refresh Token`: si no, el campo "Redirect URIs" se vuelve obligatorio (y ML **no
+   acepta `localhost`** ahí), y el token te sale con permisos de escritura que no
+   necesitás. Permisos todos en `Sin acceso` — o `Lectura` si no te deja sacarlos.
+   Tópicos, ninguno.
+3. Copiá `client_id` y `client_secret` (el secret está detrás del menú **⋮** de la
+   tarjeta de la app; si no aparece, "Restablecer Client Secret").
+4. Pegalos en `backend/.env`:
    ```
-5. Pegá el `access_token` en `backend/.env`:
+   ML_CLIENT_ID=1234567890123456
+   ML_CLIENT_SECRET=xxxxxxxxxxxxxxxx
    ```
-   ML_ACCESS_TOKEN=APP_USR-xxxxxx
-   ```
-6. Reiniciá el backend. **Nada más.**
+5. Reiniciá el backend. **Nada más.**
 
-> **Corrección importante:** las versiones anteriores de este archivo y de
-> `MERCADOLIBRE_API.md` decían que después de conseguir el token había que avisarle a
-> Claude para modificar `config.py` y el adapter. **Eso ya está hecho** — el adapter
-> inyecta el header `Authorization` desde `2026-07-31`, y desde hoy también lo hace la
-> búsqueda en vivo de `/search`. Con poner la variable y reiniciar alcanza.
+Los pasos exactos del formulario, con las trampas de cada campo, están en
+`MERCADOLIBRE_API.md` §1.
 
-**El token dura 6 horas.** No hay auto-renovación todavía (ver §4-F). Cuando vence, la
-ingesta falla con 403. Ya no queda la fuente marcada como "bloqueada por ToS" para
-siempre: desde hoy, una corrida exitosa la reactiva sola.
+> **Ya no hace falta pedir el token a mano.** Desde el 2026-08-20 el backend lo pide solo
+> con esas dos credenciales y lo renueva cuando vence (`app/services/ml_token.py`). Antes
+> había que correr un `curl` cada 6 horas — inviable en producción. `ML_ACCESS_TOKEN`
+> sigue existiendo como override manual para debuggear.
+
+Si el token vence o falla, la fuente no queda marcada como "bloqueada" para siempre: una
+corrida exitosa la reactiva sola.
 
 ### 🟡 B. Que los precios se actualicen solos — elegí un camino
 
@@ -331,8 +334,11 @@ Los productos que crea el matcher no tienen categoría, así que no hay forma de
 Salud de las fuentes (el dato ya existe en `/sources`), disparar ingestas, y revisar los
 matches dudosos — que ya se acumulan en `product_match` con su nivel de confianza.
 
-### F. Auto-renovación del token de ML
-Para no depender de que renueves a mano cada 6 horas.
+### F. ✅ Auto-renovación del token de ML — HECHO (2026-08-20)
+`app/services/ml_token.py`: pide el token con Client Credentials, lo cachea con 5 minutos
+de margen antes del vencimiento, es thread-safe (los adapters corren en hilos), nunca
+levanta excepción y espera 60 s antes de reintentar si ML rechaza las credenciales.
+10 tests, sin red.
 
 ### G. Imagen de Open Graph
 Para que el link se vea bien al compartirlo. Necesita una decisión de diseño tuya.
@@ -406,7 +412,7 @@ Para no volver a pedirlo:
 - ✅ **Pegar el link de cualquier tienda** en el buscador.
 - ✅ **SEO**: sitemap, robots, metadatos. Falta solo la imagen de Open Graph.
 - ✅ **Responsive**, verificado a 390 px y 1600×600.
-- ✅ **172 tests**.
+- ✅ **182 tests**.
 - ✅ **Seed de tiendas para producción** (`scripts/seed_sources.py`).
 - ✅ **Sin secretos en el repo** — auditado sobre todo el historial de git.
 

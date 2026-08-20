@@ -82,12 +82,15 @@ class Settings(BaseSettings):
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     # --- MercadoLibre OAuth ------------------------------------------------
-    # Client Credentials flow. Ver MERCADOLIBRE_API.md para obtener el token.
-    # Sin token: el MercadoLibreAdapter devuelve 403 en todos los endpoints.
+    # Client Credentials flow. Ver MERCADOLIBRE_API.md.
+    #
+    # Lo normal es setear SOLO client_id/secret: `app/services/ml_token.py` pide el
+    # token y lo renueva cuando vence (dura 6 horas y no hay refresh token).
+    #: Override manual. Si esta seteado gana sobre la renovacion automatica: sirve para
+    #: debuggear con un token pegado a mano. Vence a las 6 horas y no se renueva.
     ml_access_token: str | None = None
-    #: Solo se usan si algun dia se implementa la auto-renovacion del token
-    #: (MERCADOLIBRE_API.md §3d). Declarados aca para que ese helper no reviente con
-    #: `AttributeError` al leerlos.
+    #: Credenciales de la aplicacion. Con estas dos el token se obtiene y renueva solo.
+    #: Sin ninguna de las dos vias, el adapter de ML recibe 403 y esa fuente queda vacia.
     ml_client_id: str | None = None
     ml_client_secret: str | None = None
 
