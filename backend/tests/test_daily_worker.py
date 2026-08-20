@@ -169,3 +169,55 @@ def test_el_reporte_se_puede_leer(db_session, monkeypatch, sin_matcher_ni_manten
     assert "tienda" in texto
     assert "3 publicaciones" in texto
     assert "2 puntos de historial" in texto
+
+
+def test_una_fuente_sin_refresh_no_cuenta_como_fallo(db_session, monkeypatch, sin_matcher_ni_mantenimiento):
+    """Megatone no permite pedir por id y nunca va a permitirlo.
+
+    Si eso figura como ERROR, la tarea programada reporta fallo todos los días — y un
+    error que suena siempre deja de escucharse.
+    """
+    from app.adapters.errors import UnsupportedFetchMode
+
+    source = _fuente(db_session, "megatone")
+    _publicacion(db_session, source, "m1")
+
+    def _fake(db, src, request):
+        raise UnsupportedFetchMode("no soporta refresh", source_slug=src.slug)
+
+    monkeypatch.setattr(daily, "run_ingest", _fake)
+
+    report = daily.run_daily(db_session)
+
+    assert report.outcomes[0].status == "OMITIDA"
+    assert report.failed == [], "no puede contar como fallo de la corrida"
+
+
+def test_only_con_un_slug_inexistente_avisa(db_session, sin_matcher_ni_mantenimiento):
+    """Un typo devolvía un reporte vacío y código 0: idéntico a una corrida exitosa."""
+    with pytest.raises(daily.FuenteDesconocida, match="fravgea"):
+        daily.run_daily(db_session, only=["fravgea"])
+
+
+def test_el_matcher_caido_no_se_lleva_el_resumen(db_session, monkeypatch):
+    """El resumen es lo único que queda de una corrida de dos minutos: tiene que llegar."""
+    import app.matching.matcher as matcher
+    import app.services.maintenance as maintenance
+
+    source = _fuente(db_session, "tienda")
+    _publicacion(db_session, source, "abc")
+    monkeypatch.setattr(
+        daily, "run_ingest", lambda db, src, req: IngestRunResult(source_slug=src.slug, updated=1)
+    )
+
+    def _explota(db):
+        raise RuntimeError("el matcher reventó")
+
+    monkeypatch.setattr(matcher, "match_listings", _explota)
+    monkeypatch.setattr(maintenance, "run_maintenance", lambda db: "ok")
+
+    report = daily.run_daily(db_session)
+
+    assert report.outcomes[0].status == "OK", "lo refrescado tiene que seguir reportado"
+    assert "FALLO" in report.matched
+    assert report.maintenance == "ok", "el mantenimiento tiene que correr igual"

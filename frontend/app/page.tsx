@@ -129,8 +129,10 @@ function Hero() {
           maxWidth: 520,
           color: "color-mix(in srgb, var(--color-text) 65%, transparent)",
         }}>
-          Comparamos Frávega, Cetrogar, Naldo, OnCity, Megatone y Compra Gamer —
-          precio final con envío, cuotas y garantía.
+          {/* Sin nombres: la lista quedaba vieja cada vez que se sumaba una tienda,
+              y el sitio terminaba anunciando menos cobertura de la que tiene. */}
+          Comparamos los precios de las principales tiendas argentinas de electro y
+          tecnología — precio final con envío, cuotas y garantía.
         </p>
       </div>
 

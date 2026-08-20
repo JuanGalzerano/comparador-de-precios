@@ -44,6 +44,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.errors import UnsupportedFetchMode
 from app.adapters.types import RefreshRequest
 from app.enums import SourceStatus
 from app.models.listing import Listing
@@ -112,6 +113,14 @@ def _external_ids(db: Session, source: RetailerSource) -> list[str]:
     )
 
 
+class FuenteDesconocida(LookupError):
+    """`--only` con un slug que no existe o no esta activo.
+
+    Sin esto, un typo (`--only fravgea`) devolvia un reporte vacio y codigo de salida 0:
+    exactamente igual que una corrida exitosa.
+    """
+
+
 def run_daily(
     db: Session,
     *,
@@ -122,7 +131,15 @@ def run_daily(
     inicio = time.monotonic()
     report = DailyReport()
 
-    for source in _active_sources(db, only):
+    fuentes = _active_sources(db, only)
+    if only:
+        faltantes = sorted(set(only) - {s.slug for s in fuentes})
+        if faltantes:
+            raise FuenteDesconocida(
+                f"no existen o no estan activas: {', '.join(faltantes)}"
+            )
+
+    for source in fuentes:
         outcome = SourceOutcome(slug=source.slug)
         report.outcomes.append(outcome)
 
@@ -143,6 +160,12 @@ def run_daily(
             resultado = run_ingest(db, source, RefreshRequest(external_ids=external_ids))
             outcome.refreshed = resultado.updated + resultado.inserted
             outcome.price_points = resultado.price_points_added
+        except UnsupportedFetchMode:
+            # No es una falla: es una fuente cuyo buscador no permite pedir por id
+            # (Megatone/Doofinder). Marcarlo como ERROR haría que la tarea programada
+            # reporte fallo TODOS los días, y un error que suena siempre no se escucha.
+            db.rollback()
+            outcome.skipped_reason = "la fuente no permite releer publicaciones por id"
         except Exception as exc:
             # Una fuente caida no puede dejar sin actualizar a las otras ocho.
             db.rollback()
@@ -150,14 +173,27 @@ def run_daily(
             logger.warning("fuente %s fallo: %s", source.slug, exc)
 
     if not dry_run:
+        # El matcher y el mantenimiento van en su propio try: si revientan, el resumen
+        # de lo que SÍ se refrescó tiene que llegar igual al log. Sin esto, una excepción
+        # acá se lleva puesto el reporte entero de una corrida de dos minutos.
         from app.matching.matcher import match_listings
 
-        report.matched = str(match_listings(db))
+        try:
+            report.matched = str(match_listings(db))
+        except Exception as exc:
+            db.rollback()
+            report.matched = f"FALLO: {type(exc).__name__}: {exc}"
+            logger.warning("el matcher fallo: %s", exc)
 
         if not skip_maintenance:
             from app.services.maintenance import run_maintenance
 
-            report.maintenance = str(run_maintenance(db))
+            try:
+                report.maintenance = str(run_maintenance(db))
+            except Exception as exc:
+                db.rollback()
+                report.maintenance = f"FALLO: {type(exc).__name__}: {exc}"
+                logger.warning("el mantenimiento fallo: %s", exc)
 
     report.seconds = time.monotonic() - inicio
     return report
@@ -207,12 +243,16 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     with SessionLocal() as db:
-        report = run_daily(
-            db,
-            only=args.only,
-            dry_run=args.dry_run,
-            skip_maintenance=args.skip_maintenance,
-        )
+        try:
+            report = run_daily(
+                db,
+                only=args.only,
+                dry_run=args.dry_run,
+                skip_maintenance=args.skip_maintenance,
+            )
+        except FuenteDesconocida as exc:
+            parser.error(str(exc))
+            return 2  # inalcanzable: `parser.error` termina el proceso.
         if args.log_file:
             # Sin consola, el resumen tiene que ir al log o se pierde.
             logger.info(chr(10) + report.render())

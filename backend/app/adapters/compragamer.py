@@ -66,6 +66,7 @@ from app.adapters.types import (
     NormalizedListingInput,
     ProductHint,
     RawListing,
+    RefreshRequest,
     SearchQuery,
     SourceCapabilities,
 )

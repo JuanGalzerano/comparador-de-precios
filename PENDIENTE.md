@@ -126,7 +126,7 @@ Para hacerlo andar hubo que implementar el modo refresh, que tres adapters no te
 | Cetrogar, Naldo, OnCity, Easy, Carrefour, Jumbo | `fq=productId:N` del catalogo VTEX, de a 50 por request. Funciona incluso en las tiendas configuradas con Intelligent Search: el filtro es del Catalog System y esta disponible en las dos |
 | Compra Gamer | Gratis: el adapter se baja el catalogo entero igual, refrescar es filtrar en memoria |
 | Fravega | Una request por publicacion, buscando el codigo como palabra clave. Su GraphQL **no tiene filtro por SKU** — se introspecciono el tipo `Filters` y no existe. Por eso hay una pausa de 0,25 s entre requests, y por eso Fravega sola tarda ~160 s |
-| **Megatone** | ⛔ **Sin refresh.** Su buscador (Doofinder) no expone forma de pedir por id. Son 105 publicaciones de 969: la corrida cubre el **89%** del catalogo |
+| **Megatone** | ⛔ **Sin refresh.** Su buscador (Doofinder) no expone forma de pedir por id. Son 105 publicaciones de 969: la corrida cubre el **89%** del catalogo. Figura como OMITIDA, no como error: es una capacidad que la fuente no tiene, y marcarla como fallo haria que la tarea programada reporte error todos los dias |
 
 Decisiones que importan:
 

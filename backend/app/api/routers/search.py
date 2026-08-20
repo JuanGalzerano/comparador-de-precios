@@ -566,8 +566,10 @@ def search(
     # distinguir un producto que se busca seguido de uno que nadie miró nunca.
     touch_products(db, [item.id for item in items if item.id > 0])
 
-    # Complementar con ML live si la DB no llena la página (solo la primera: ver arriba)
-    if q and q.strip() and page == 1 and len(items) < page_size:
+    # Complementar con ML live si la DB no llena la página (solo la primera: ver arriba).
+    # `live` manda acá también: es el caso común (la base casi nunca llena la página),
+    # así que sin este chequeo `live=false` seguía saliendo a la red igual.
+    if live and q and q.strip() and page == 1 and len(items) < page_size:
         ml_items = _ml_live_search(q.strip(), page_size - len(items))
         items.extend(ml_items)
         total += len(ml_items)
