@@ -10,3 +10,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Archivos temporales del modo WAL de SQLite.
+dev.db-shm
+dev.db-wal

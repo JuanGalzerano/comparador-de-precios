@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     # --- MercadoLibre OAuth ------------------------------------------------
-    # Client Credentials flow. Ver MERCADOLIBRE_API.md.
+    # Client Credentials flow. Ver PENDIENTE.md.
     #
     # Lo normal es setear SOLO client_id/secret: `app/services/ml_token.py` pide el
     # token y lo renueva cuando vence (dura 6 horas y no hay refresh token).

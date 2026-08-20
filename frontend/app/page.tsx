@@ -129,7 +129,7 @@ function Hero() {
           maxWidth: 520,
           color: "color-mix(in srgb, var(--color-text) 65%, transparent)",
         }}>
-          Comparamos MercadoLibre, Frávega, Cetrogar, Naldo y más —
+          Comparamos Frávega, Cetrogar, Naldo, OnCity, Megatone y Compra Gamer —
           precio final con envío, cuotas y garantía.
         </p>
       </div>
@@ -361,7 +361,7 @@ async function SearchResults({
     );
   }
 
-  const { items, total } = result.data;
+  const { items, total, relaxed_query: relaxedQuery } = result.data;
 
   return (
     <section style={{ marginTop: 24 }}>
@@ -371,6 +371,18 @@ async function SearchResults({
           {total} {total === 1 ? "producto" : "productos"}
         </span>
       </div>
+
+      {/* Sin este aviso, ver placas genericas despues de pedir un modelo puntual
+          parece que el buscador ignoro lo que se le pidio. */}
+      {relaxedQuery ? (
+        <p
+          className="text-muted"
+          style={{ fontSize: 14, marginBottom: 16, lineHeight: 1.6 }}
+        >
+          No encontramos resultados exactos para &ldquo;{query}&rdquo;. Te mostramos lo que
+          hay para <strong style={{ color: "var(--color-text)" }}>{relaxedQuery}</strong>.
+        </p>
+      ) : null}
 
       {items.length === 0 ? (
         <p className="text-muted" style={{ fontSize: 14 }}>

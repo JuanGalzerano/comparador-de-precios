@@ -27,13 +27,15 @@ que el mock especifique.
 from __future__ import annotations
 
 import logging
+import math
+import re
 from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Query
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, func, or_, select
 
 from app.api.deps import DbSession
 from app.enums import ItemCondition
@@ -80,7 +82,7 @@ def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
     """
     headers = {"Accept": "application/json"}
     # La API de ML pasó a exigir OAuth: sin token responde 403 y esta funcion devuelve
-    # vacio. El token se obtiene y renueva solo. Ver MERCADOLIBRE_API.md.
+    # vacio. El token se obtiene y renueva solo. Ver PENDIENTE.md.
     if token := ml_token.get_token():
         headers["Authorization"] = f"Bearer {token}"
 
@@ -146,6 +148,7 @@ def _order_by(sort: SearchSort) -> list[ColumnElement[Any]]:
 def _build_filters(
     *,
     q: str | None,
+    tokens: list[str] | None = None,
     category: str | None,
     condition: Literal["all", "new", "used", "refurbished", "unknown"],
 ) -> list[ColumnElement[bool]]:
@@ -161,20 +164,157 @@ def _build_filters(
         filters.append(Listing.condition == ItemCondition(condition))
     if category:
         filters.append(func.lower(Product.category) == category.strip().lower())
-    if q and q.strip():
-        # `%` y `_` del usuario son comodines de LIKE: sin escaparlos, buscar "50%"
-        # matchea cualquier cosa que empiece con 50 y "a_b" matchea "axb".
-        escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        like = f"%{escaped}%"
-        filters.append(
-            or_(
-                Product.canonical_title.ilike(like, escape="\\"),
-                Product.brand.ilike(like, escape="\\"),
-                Product.model.ilike(like, escape="\\"),
-                Listing.title.ilike(like, escape="\\"),
-            )
-        )
+    # `is not None` y no un `if` a secas: evaluar la verdad de una expresion de
+    # SQLAlchemy levanta TypeError.
+    text_filter = _text_filter(q, tokens)
+    if text_filter is not None:
+        filters.append(text_filter)
     return filters
+
+
+#: Palabras que no discriminan nada: aparecen en cualquier titulo y solo hacen ruido.
+_STOPWORDS = frozenset(
+    {"de", "del", "la", "el", "los", "las", "un", "una", "con", "para", "por", "y", "o", "en", "a"}
+)
+
+#: Tope de tokens que se consideran. Un slug de MercadoLibre puede traer 12 palabras;
+#: mas alla de esto no se gana precision y la consulta se vuelve enorme.
+_MAX_TOKENS = 8
+
+#: Fraccion de las palabras de contexto que tiene que matchear. 0.4 sobre 7 palabras
+#: pide 3: suficiente para excluir otro producto, laxo para tolerar que cada tienda
+#: titule distinto.
+_CONTEXT_RATIO = 0.4
+
+_SEARCHABLE_COLUMNS = (
+    Product.canonical_title,
+    Product.brand,
+    Product.model,
+    Listing.title,
+)
+
+
+def _tokenize(q: str) -> list[str]:
+    """Palabras utiles de la consulta, sin stopwords ni repetidas, en orden."""
+    tokens: list[str] = []
+    for raw in re.split(r"[^0-9a-zA-ZÀ-ſ]+", q.lower()):
+        if len(raw) < 2 or raw in _STOPWORDS or raw in tokens:
+            continue
+        tokens.append(raw)
+        if len(tokens) == _MAX_TOKENS:
+            break
+    return tokens
+
+
+def _matches_token(token: str) -> ColumnElement[bool]:
+    """El token aparece en alguna de las columnas de texto."""
+    # `%` y `_` del usuario son comodines de LIKE: sin escaparlos, buscar "50%" matchea
+    # cualquier cosa que empiece con 50 y "a_b" matchea "axb".
+    escaped = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{escaped}%"
+    return or_(*[col.ilike(like, escape="\\") for col in _SEARCHABLE_COLUMNS])
+
+
+def _is_model_number(token: str) -> bool:
+    """Numero de modelo: puro digito y de 3 cifras para arriba (5080, 4090, 128).
+
+    Se exigen 3 cifras porque con dos (el `13` de "iphone 13") el numero aparece dentro
+    de cualquier otro codigo y no discrimina. Los alfanumericos tipo `16gb` o `gddr7` NO
+    entran a proposito: cada tienda los escribe distinto (`16GB`, `16 GB`, `16g`) y
+    hacerlos obligatorios dejaria afuera al mismo producto.
+    """
+    return token.isdigit() and len(token) >= 3
+
+
+def _text_filter(q: str | None, tokens: list[str] | None = None) -> ColumnElement[bool] | None:
+    """Filtro de texto tolerante a titulos largos.
+
+    El problema que resuelve: pegar el link de un producto produce una consulta como
+    "placa de video nvidia gigabyte geforce rtx 5080 windforce oc 16g gddr7". Buscar esa
+    frase entera con `ILIKE '%...%'` no matchea nada, porque ninguna otra tienda titula
+    igual — y el usuario ve "sin resultados" para un producto que el comparador tiene.
+
+    La regla, entonces:
+
+    - **Los numeros de modelo son obligatorios.** Sin esto, aflojar la busqueda haria que
+      pedir una 5080 devuelva una 5070 de la misma marca, que es peor que no devolver
+      nada.
+    - **El resto es contexto**: alcanza con que matchee una fraccion. Asi entra el mismo
+      producto publicado como "Placa de Video Gigabyte GeForce RTX 5080 16GB".
+    """
+    if tokens is None:
+        if not q or not q.strip():
+            return None
+        tokens = _tokenize(q)
+    if not tokens:
+        return None
+
+    obligatorios = [t for t in tokens if _is_model_number(t)]
+    contexto = [t for t in tokens if not _is_model_number(t)]
+
+    condiciones: list[ColumnElement[bool]] = [_matches_token(t) for t in obligatorios]
+
+    if contexto:
+        # El piso es 2 (no 1) cuando hay varias palabras: con una sola coincidencia,
+        # una palabra generica como "video" arrastra medio catalogo.
+        piso = 1 if len(contexto) == 1 else 2
+        minimo = max(piso, math.ceil(len(contexto) * _CONTEXT_RATIO))
+        if minimo >= len(contexto):
+            # Consulta corta: pedirlas todas es lo mismo y evita el `CASE` de mas.
+            condiciones.extend(_matches_token(t) for t in contexto)
+        else:
+            aciertos = sum(case((_matches_token(t), 1), else_=0) for t in contexto)
+            condiciones.append(aciertos >= minimo)
+
+    return and_(*condiciones)
+
+
+
+#: Hasta cuantas veces se afloja la busqueda antes de rendirse. Cada intento es una
+#: consulta mas a la base, asi que no es gratis; con 4 se cubre desde un slug de 8
+#: palabras hasta las 2 primeras.
+_MAX_RELAXATIONS = 4
+
+
+def _relaxations(tokens: list[str]) -> list[list[str]]:
+    """Versiones progresivamente mas cortas de la consulta, de mas a menos exigente.
+
+    Se sueltan palabras **del final**, no del principio, porque los titulos de producto
+    van de lo general a lo especifico: "placa de video nvidia gigabyte geforce rtx 5080
+    windforce" empieza por lo que el usuario reconoce y termina en detalles del
+    fabricante. Soltando desde atras, la primera version que devuelve algo sigue siendo
+    del rubro que se pidio.
+
+    Mostrar las placas de video Nvidia es mas util que una pantalla vacia: el usuario ve
+    que el producto exacto no esta pero el comparador funciona, y de paso encuentra
+    alternativas.
+    """
+    # Las palabras de una o dos letras se descartan al aflojar: como se busca por
+    # subcadena, "no" matchea "Notebook" y la busqueda relajada devolveria basura.
+    utiles = [t for t in tokens if len(t) >= 3]
+
+    intentos: list[list[str]] = []
+    corte = len(utiles) - 1
+    while corte >= 2 and len(intentos) < _MAX_RELAXATIONS:
+        intentos.append(utiles[:corte])
+        corte -= 1
+    return intentos
+
+def _live_term(q: str) -> str:
+    """Termino recortado para preguntarle a las tiendas.
+
+    Los adapters buscan en el buscador de cada tienda, que tampoco entiende una frase de
+    doce palabras: se le manda el slug entero a Fravega y devuelve cero. Se quedan los
+    numeros de modelo y las primeras palabras de contexto, que es lo que una persona
+    tipearia.
+    """
+    tokens = _tokenize(q)
+    if len(tokens) <= 4:
+        return q.strip()
+
+    contexto = [t for t in tokens if not _is_model_number(t)][:3]
+    recortado = [t for t in tokens if _is_model_number(t) or t in contexto]
+    return " ".join(recortado)
 
 
 #: Cuántos clusters tiene que tener ya la base para considerar que la búsqueda está
@@ -291,7 +431,9 @@ def search(
     # catálogo no puede disparar tráfico a las tiendas.
     ephemeral: list[ProductClusterOut] = []
     if live and q and q.strip() and page == 1:
-        ephemeral = _maybe_fetch_live(db, q.strip(), category=category, condition=condition)
+        # Recortado: a las tiendas se les manda un termino que su buscador entienda,
+        # no el slug de doce palabras que salio del link pegado.
+        ephemeral = _maybe_fetch_live(db, _live_term(q), category=category, condition=condition)
 
     if ephemeral:
         # Modo degradado (base en la cuota): no hay nada que consultar en la base para
@@ -300,32 +442,54 @@ def search(
             items=ephemeral[:page_size], page=page, page_size=page_size, total=len(ephemeral)
         )
 
-    filters = _build_filters(q=q, category=category, condition=condition)
-
     # --- Paso 1: agregado por producto (cuenta + min/max de `final_price`) ------
     # Un producto sin ninguna publicacion que matchee los filtros no debe aparecer:
     # el INNER JOIN implicito de `select_from(Listing).join(Product)` ya lo garantiza
     # (y de paso excluye publicaciones huerfanas con `product_id IS NULL`, que son un
     # estado valido de la ingesta pero no tienen cluster que mostrar).
-    agg_stmt = (
-        select(
-            Product.id.label("product_id"),
-            func.count(Listing.id).label("listing_count"),
-            func.count(func.distinct(Listing.retailer_source_id)).label("retailer_count"),
-            func.min(Listing.final_price).label("min_final_price"),
-            func.max(Listing.final_price).label("max_final_price"),
+    def _agregado(filtros: list[ColumnElement[bool]]):
+        stmt = (
+            select(
+                Product.id.label("product_id"),
+                func.count(Listing.id).label("listing_count"),
+                func.count(func.distinct(Listing.retailer_source_id)).label("retailer_count"),
+                func.min(Listing.final_price).label("min_final_price"),
+                func.max(Listing.final_price).label("max_final_price"),
+            )
+            .select_from(Listing)
+            .join(Product, Listing.product_id == Product.id)
+            .where(*filtros)
+            .group_by(Product.id)
         )
-        .select_from(Listing)
-        .join(Product, Listing.product_id == Product.id)
-        .where(*filters)
-        .group_by(Product.id)
-    )
-    if min_retailers > 1:
-        agg_stmt = agg_stmt.having(
-            func.count(func.distinct(Listing.retailer_source_id)) >= min_retailers
-        )
+        if min_retailers > 1:
+            stmt = stmt.having(
+                func.count(func.distinct(Listing.retailer_source_id)) >= min_retailers
+            )
+        return stmt
 
+    filters = _build_filters(q=q, category=category, condition=condition)
+    agg_stmt = _agregado(filters)
     total = db.execute(select(func.count()).select_from(agg_stmt.subquery())).scalar_one()
+
+    # Cascada: si la busqueda exacta no encontro nada, se sueltan palabras del final
+    # hasta que algo aparezca. Mostrar las placas de video Nvidia cuando se pidio un
+    # modelo puntual es mas util que una pantalla vacia — pero hay que decirlo, o
+    # parece que el buscador ignoro lo que se pidio (de ahi `relaxed_query`).
+    relaxed_query: str | None = None
+    if total == 0 and q and q.strip():
+        for tokens in _relaxations(_tokenize(q)):
+            filtros_aflojados = _build_filters(
+                q=q, tokens=tokens, category=category, condition=condition
+            )
+            candidato = _agregado(filtros_aflojados)
+            encontrados = db.execute(
+                select(func.count()).select_from(candidato.subquery())
+            ).scalar_one()
+            if encontrados:
+                agg_stmt, total, filters = candidato, encontrados, filtros_aflojados
+                relaxed_query = " ".join(tokens)
+                logger.info("busqueda aflojada: %r -> %r (%s resultados)", q, relaxed_query, total)
+                break
 
     page_stmt = (
         agg_stmt.order_by(*_order_by(sort)).limit(page_size).offset((page - 1) * page_size)
@@ -336,8 +500,14 @@ def search(
         # Solo en la primera pagina: la busqueda live de ML no sabe paginar (no se le
         # pasa offset), asi que pedirla de nuevo en la pagina 2 devolvia LOS MISMOS
         # resultados y la paginacion no terminaba nunca.
-        ml_items = _ml_live_search(q.strip(), page_size) if q and q.strip() and page == 1 else []
-        return SearchResponse(items=ml_items, page=page, page_size=page_size, total=len(ml_items))
+        # `live` tambien manda aca: decia "no consultes las tiendas" y esta llamada lo
+        # ignoraba, saliendo a la red igual.
+        ml_items = (
+            _ml_live_search(q.strip(), page_size) if live and q and q.strip() and page == 1 else []
+        )
+        return SearchResponse(
+            items=ml_items, page=page, page_size=page_size, total=len(ml_items)
+        )
 
     product_ids = [row.product_id for row in agg_rows]
     products_by_id = {
@@ -402,4 +572,6 @@ def search(
         items.extend(ml_items)
         total += len(ml_items)
 
-    return SearchResponse(items=items, page=page, page_size=page_size, total=total)
+    return SearchResponse(
+        items=items, page=page, page_size=page_size, total=total, relaxed_query=relaxed_query
+    )

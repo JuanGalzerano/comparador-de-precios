@@ -5,7 +5,7 @@
  * Verificado contra el shape REAL devuelto (no inventado): se corrio
  * `GET /search` y `GET /products/{id}` con `TestClient` contra una DB
  * SQLite sembrada igual que `backend/tests/conftest.py` (Postgres no esta
- * alcanzable en este entorno — ver README/ESTADO.md del backend). Punto no
+ * alcanzable en este entorno — ver README del backend). Punto no
  * obvio: pydantic serializa `Decimal` como STRING en el JSON (ej.
  * `"702000.00"`, `"4.30"`), no como number — por eso todos los campos de
  * plata/rating son `string` aca, no `number`. Los enums viajan como su
@@ -42,6 +42,12 @@ export interface SearchResponse {
   page: number;
   page_size: number;
   total: number;
+  /**
+   * Consulta que efectivamente devolvio estos resultados, cuando NO es la que
+   * escribio el usuario. Se completa solo si la busqueda exacta dio cero y el
+   * backend tuvo que soltar palabras. `null` = busqueda exacta.
+   */
+  relaxed_query: string | null;
 }
 
 /** `ListingOut` — una publicacion dentro de la ficha de producto. */

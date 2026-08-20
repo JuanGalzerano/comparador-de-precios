@@ -200,7 +200,7 @@ class MercadoLibreAdapter(BaseSourceAdapter):
         headers = dict(self.config.headers)
         if self.config.user_agent:
             headers.setdefault("User-Agent", self.config.user_agent)
-        # OAuth 2.0 Client Credentials. Ver MERCADOLIBRE_API.md.
+        # OAuth 2.0 Client Credentials. Ver PENDIENTE.md.
         # El token se renueva solo a partir de ML_CLIENT_ID/ML_CLIENT_SECRET; poner
         # ML_ACCESS_TOKEN a mano sigue funcionando y tiene precedencia.
         from app.services import ml_token

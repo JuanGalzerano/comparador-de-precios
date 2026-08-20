@@ -97,7 +97,7 @@ SOURCES: list[dict] = [
         "config_json": {"site_id": "MLA"},
         "tos_risk_note": (
             "La API pública pasó a requerir OAuth: hace falta registrar una app en el "
-            "portal de desarrolladores para reactivarla (ver MERCADOLIBRE_API.md)."
+            "portal de desarrolladores para reactivarla (ver PENDIENTE.md)."
         ),
     },
 ]

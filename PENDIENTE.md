@@ -44,7 +44,7 @@ autenticación: hoy responde `403` a todo.
 5. Reiniciá el backend. **Nada más.**
 
 Los pasos exactos del formulario, con las trampas de cada campo, están en
-`MERCADOLIBRE_API.md` §1.
+el portal de developers de ML.
 
 > **Ya no hace falta pedir el token a mano.** Desde el 2026-08-20 el backend lo pide solo
 > con esas dos credenciales y lo renueva cuando vence (`app/services/ml_token.py`). Antes
@@ -54,13 +54,53 @@ Los pasos exactos del formulario, con las trampas de cada campo, están en
 **Pero eso ya no alcanza.** Verificado el 2026-08-20 con un token valido: ML responde
 `403 forbidden` en `/sites/MLA/search`, el endpoint del que sale todo. La busqueda de
 catalogo (`/products/search`) si contesta, pero devuelve productos sin precio ni link —
-inservible para un comparador. Detalle completo en `MERCADOLIBRE_API.md` §3c.
+inservible para un comparador. Detalle abajo.
 
 **Conclusion: no es una tarea pendiente tuya, es acceso que ML no da.** El adapter, el
 token y la auto-renovacion funcionan. Las otras cinco tiendas no dependen de esto.
 
 Si algun dia reabren el acceso o consegues permisos por el programa de partners, la
 fuente vuelve sola: una corrida exitosa la reactiva.
+
+#### El detalle, endpoint por endpoint
+
+**Con el token funcionando, `/sites/MLA/search` responde `403 forbidden`.** No es un
+problema de credenciales: el mismo token entra sin drama a otros endpoints. MercadoLibre
+cerro la busqueda por sitio para aplicaciones comunes.
+
+Probado endpoint por endpoint con un token recien emitido:
+
+| Endpoint | Resultado |
+|---|---|
+| `GET /sites/MLA` | 200 |
+| `GET /sites/MLA/search?q=iphone` | **403 forbidden** |
+| `GET /products/search?site_id=MLA&q=...` | 200 |
+| `GET /items?ids=...` | 200 |
+| `GET /users/me` | 200 |
+
+#### Por que `/products/search` no alcanza como reemplazo
+
+Encuentra bien los productos (`Apple iPhone 15 (128 GB) - Verde`), pero devuelve el
+**catalogo**, no publicaciones: sin precio y sin link. Se probo pidiendo el detalle de
+cada producto — `buy_box_winner` viene `null` y `permalink` vacio en todos los casos
+consultados, tanto en celulares como en accesorios.
+
+Sin precio no hay nada que comparar. Es el unico dato que Cotejo necesita de una fuente.
+
+#### Que queda
+
+- **La fuente `mercadolibre` no puede alimentar el comparador hoy.** El adapter esta
+  escrito, testeado y funcionando — lo que falta es acceso, no codigo.
+- **El token y su auto-renovacion andan** . Si ML reabre el acceso, o si consegue
+  permisos por otra via, no hay que tocar nada mas.
+- La via formal para pedir mas acceso es el programa de partners de ML (la app figura
+  como "no certificada"). No esta verificado que lo den para un proyecto personal.
+- **Las otras cinco tiendas no dependen de esto.** Fravega, Cetrogar, Naldo, OnCity,
+  Megatone y Compra Gamer usan sus propias APIs publicas y siguen funcionando.
+
+---
+
+---
 
 ### 🟡 B. Que los precios se actualicen solos — elegí un camino
 
@@ -133,6 +173,13 @@ Orden exacto, ya verificado contra el código:
   el backend en http://localhost:8000".
 - **El backend no tiene `Procfile` ni `Dockerfile`**, solo `pyproject.toml`. Railway lo va
   a detectar solo, pero contá con iterar un poco ahí; no es "un clic".
+
+### Monetización (para cuando el sitio esté online)
+
+Google AdSense necesita **dominio propio, contenido real y algo de tráfico** antes de
+aprobar la cuenta — no se puede preparar antes de lanzar. La integración en sí es un
+`<Script>` de `pagead2.googlesyndication.com` en `frontend/app/layout.tsx` más un
+componente `<AdBanner slot="...">` entre secciones, y verificar el dominio en su consola.
 
 ### Decisiones que son tuyas
 

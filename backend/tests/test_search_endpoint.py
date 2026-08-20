@@ -103,4 +103,10 @@ def test_search_empty_db_returns_empty_page(client, db_session):
     resp = client.get("/search")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"items": [], "page": 1, "page_size": 20, "total": 0}
+    assert body == {
+        "items": [],
+        "page": 1,
+        "page_size": 20,
+        "total": 0,
+        "relaxed_query": None,
+    }

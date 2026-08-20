@@ -20,7 +20,7 @@ Plan completo de arquitectura y roadmap: `C:\Users\juani\.claude\plans\ahora-hac
 | **Frávega** | ✅ Activa | API GraphQL pública del propio sitio (`/api/v2`). |
 | **Cetrogar** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
 | **Naldo** | ✅ Activa | API pública de catálogo VTEX Intelligent Search. |
-| **MercadoLibre** | ⏸ Pausada | La API pública pasó a exigir OAuth: hace falta registrar una app en el portal de desarrolladores (ver `MERCADOLIBRE_API.md`). El adapter está escrito y testeado. |
+| **MercadoLibre** | ⛔ Cerrada | ML dejó de dar acceso a la búsqueda: con un token válido, `/sites/MLA/search` responde 403. El adapter, el token y su renovación funcionan — lo que falta es acceso, y no depende de nosotros (ver `PENDIENTE.md`). |
 | **Precios Claros / SEPA** (dato oficial del gobierno argentino) | ⏳ Evaluando viabilidad | El Estado obliga a grandes cadenas a publicar precios en archivos diarios. Falta confirmar si las cadenas de electro/tecnología realmente reportan ahí antes de construir el importer. |
 | **Musimundo, Garbarino, Compumundo y otras** | ❌ No integradas todavía | No tienen API pública accesible. Si en algún momento se suman, va a ser con scraping propio (servidor propio, nunca con la computadora del visitante — ver más abajo) y con aprobación explícita retailer por retailer. |
 
@@ -65,7 +65,7 @@ actual. Todo el scraping, si se hace, corre en servidores propios.
 - ⏳ Ingesta programada (Celery/Redis), alertas de precio, panel de administración,
   categorías, despliegue.
 
-Detalle completo en `ESTADO.md`; lo que falta y quién lo hace, en `PENDIENTE.md`.
+Lo que falta y por qué, en `PENDIENTE.md`.
 
 ## Cómo correrlo en local
 

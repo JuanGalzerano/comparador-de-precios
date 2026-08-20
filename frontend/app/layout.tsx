@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * Layout minimo a proposito (alcance de esta tarea, ver ESTADO.md): solo
+ * Layout minimo a proposito (alcance de esta tarea): solo
  * marca + buscador. Nav completa (/ofertas, /para-vos, "Ingresar"), cookie
  * consent y ads del prototipo quedan afuera — no se clona la pagina entera,
  * solo el circuito busqueda -> resultados -> ficha.

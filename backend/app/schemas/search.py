@@ -52,3 +52,8 @@ class SearchResponse(BaseModel):
     page: int
     page_size: int
     total: int
+    #: Consulta que efectivamente devolvio estos resultados, cuando NO es la que pidio
+    #: el usuario. Se completa solo si la busqueda exacta dio cero y hubo que soltar
+    #: palabras (ver `_relaxations` en el router): el frontend lo muestra como
+    #: "no encontramos X, estos son los resultados de Y". `None` = busqueda exacta.
+    relaxed_query: str | None = None
