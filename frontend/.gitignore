@@ -20,3 +20,8 @@ npm-debug.log*
 
 # typescript incremental build cache
 tsconfig.tsbuildinfo
+
+# Salida del build para Cloudflare Workers.
+.open-next/
+.wrangler/
+.dev.vars

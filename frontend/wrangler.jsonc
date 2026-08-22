@@ -1,0 +1,23 @@
+{
+  // Config del Worker que sirve el frontend de Cotejo en Cloudflare.
+  // El build lo hace `@opennextjs/cloudflare`, que transforma la salida de Next a
+  // algo que Workers pueda correr, y deja todo en `.open-next/`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cotejo",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-20",
+  // `nodejs_compat` lo necesita Next para las APIs de Node.
+  // `global_fetch_strictly_public` hace que un fetch a una URL propia salga a internet
+  // en vez de resolverse dentro del Worker.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "cotejo"
+    }
+  ]
+}

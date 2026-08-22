@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.2",
     "next": "^16.2.12",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
@@ -17,6 +18,7 @@
     "@types/node": "^20.14.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "wrangler": "^4.125.0"
   }
 }
