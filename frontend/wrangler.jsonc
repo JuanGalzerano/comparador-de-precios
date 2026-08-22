@@ -14,6 +14,11 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Logs del Worker en el panel de Cloudflare. Sin esto, un error en produccion no deja
+  // rastro: la request devuelve 500 y no hay donde ver por que.
+  "observability": {
+    "enabled": true
+  },
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
