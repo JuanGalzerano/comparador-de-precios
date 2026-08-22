@@ -1,0 +1,7 @@
+# Las dependencias reales se declaran en `pyproject.toml`, que es la unica fuente de
+# verdad. Este archivo existe solo porque las plataformas de deploy (Railway, Render)
+# buscan un `requirements.txt` para saber que instalar.
+#
+# El punto significa "instala el paquete de este directorio con sus dependencias", asi
+# que no hay dos listas que mantener sincronizadas.
+.

@@ -196,8 +196,14 @@ Orden exacto, ya verificado contra el código:
 - **`NEXT_PUBLIC_API_URL` se congela cuando Vercel hace el build.** Si la agregás después
   del primer deploy sin forzar rebuild, todo el sitio va a decir "No pudimos conectar con
   el backend en http://localhost:8000".
-- **El backend no tiene `Procfile` ni `Dockerfile`**, solo `pyproject.toml`. Railway lo va
-  a detectar solo, pero contá con iterar un poco ahí; no es "un clic".
+- **El backend ya tiene `Procfile` y `requirements.txt`** (agregados el 2026-08-20). Sin
+  ellos el build de Railway fallaba: Railpack detectaba Python pero no sabía cómo
+  arrancar la app — busca `main.py` o `app.py` en la raíz, y acá la entrada es
+  `app.main:app`, un módulo dentro de un paquete.
+
+  El `requirements.txt` tiene una sola línea, `.`, que significa "instalá el paquete de
+  este directorio con sus dependencias". Así `pyproject.toml` sigue siendo la única
+  fuente de verdad y no hay dos listas que mantener sincronizadas.
 
 ### Monetización (para cuando el sitio esté online)
 
