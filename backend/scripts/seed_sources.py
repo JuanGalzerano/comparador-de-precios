@@ -79,6 +79,10 @@ SOURCES: list[dict] = [
         "config_json": {
             "base_url": "https://www.carrefour.com.ar",
             "api_flavor": "legacy_catalog",
+            # `C:/3/` = "Electro y tecnologia". Sin esto entra el supermercado entero:
+            # buscar "papel" devolvia 346 resultados de almacen y la home del sitio
+            # terminaba mostrando papel higienico. Con el filtro, 11.
+            "search_filters": {"fq": "C:/3/"},
         },
         "tos_risk_note": None,
     },
@@ -90,7 +94,13 @@ SOURCES: list[dict] = [
         # Verificado 2026-08-20: Intelligent Search responde 200 con precio, precio de
         # lista, marca, link, stock y cuotas. Suma linea blanca y herramientas, un
         # segmento que las otras cinco tiendas cubren poco.
-        "config_json": {"base_url": "https://www.easy.com.ar"},
+        "config_json": {
+            "base_url": "https://www.easy.com.ar",
+            # `C:/3/` = "Electrodomesticos". Easy es una casa de construccion: sin el
+            # filtro entran pinturas, plomeria y espejos.
+            "api_flavor": "legacy_catalog",
+            "search_filters": {"fq": "C:/3/"},
+        },
         "tos_risk_note": None,
     },
     {
