@@ -39,6 +39,7 @@ import argparse
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -54,6 +55,10 @@ from app.workers.ingest import run_ingest
 logger = logging.getLogger(__name__)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @dataclass
 class SourceOutcome:
     """Como le fue a una fuente en la corrida."""
@@ -61,6 +66,8 @@ class SourceOutcome:
     slug: str
     refreshed: int = 0
     price_points: int = 0
+    #: Publicaciones que se pidieron y la tienda ya no devolvio: descatalogadas.
+    delisted: int = 0
     skipped_reason: str | None = None
     error: str | None = None
 
@@ -85,6 +92,7 @@ class DailyReport:
         for o in self.outcomes:
             detalle = o.error or o.skipped_reason or (
                 f"{o.refreshed} publicaciones, {o.price_points} puntos de historial"
+                + (f", {o.delisted} descatalogadas" if o.delisted else "")
             )
             lineas.append(f"  [{o.status:7}] {o.slug:14} {detalle}")
         if self.matched is not None:
@@ -119,6 +127,44 @@ class FuenteDesconocida(LookupError):
     Sin esto, un typo (`--only fravgea`) devolvia un reporte vacio y codigo de salida 0:
     exactamente igual que una corrida exitosa.
     """
+
+
+def _marcar_descatalogadas(
+    db: Session, source: RetailerSource, pedidos: list[str], desde: datetime
+) -> int:
+    """Marca como no disponibles las publicaciones que la tienda dejo de devolver.
+
+    Cuando un retailer deja de vender algo, su API simplemente no lo trae mas. Sin esto,
+    la publicacion se queda en la base con el ultimo precio que se le conocio, para
+    siempre — y como el sitio ordena de mas barato a mas caro, un precio viejo tiende a
+    quedar primero. Se vio con un Smart TV de Fravega a $109.999 que ya no existia,
+    apareciendo como la mejor oferta contra el mismo modelo a $629.999 en Naldo.
+
+    No se borran: se conserva el historial de precios, y si la tienda vuelve a
+    publicarlas el proximo refresh limpia la marca sola.
+    """
+    if not pedidos:
+        return 0
+
+    # `desde` se toma ANTES de refrescar. El upsert pisa `fetched_at` en cada publicacion
+    # que si volvio, asi que las que quedaron con una marca anterior a `desde` son
+    # exactamente las que la tienda ya no devuelve.
+    faltantes = (
+        db.query(Listing)
+        .filter(
+            Listing.retailer_source_id == source.id,
+            Listing.external_id.in_(pedidos),
+            Listing.fetched_at < desde,
+            Listing.unavailable_since.is_(None),
+        )
+        .all()
+    )
+    ahora = _utcnow()
+    for listing in faltantes:
+        listing.unavailable_since = ahora
+    if faltantes:
+        db.commit()
+    return len(faltantes)
 
 
 def run_daily(
@@ -157,9 +203,12 @@ def run_daily(
         try:
             # `run_ingest` no corre el matcher (eso lo hace el CLI de `ingest`), que
             # es justo lo que queremos: acá se corre una sola vez al final.
+            # Antes de refrescar, para poder distinguir despues cuales no volvieron.
+            antes = _utcnow()
             resultado = run_ingest(db, source, RefreshRequest(external_ids=external_ids))
             outcome.refreshed = resultado.updated + resultado.inserted
             outcome.price_points = resultado.price_points_added
+            outcome.delisted = _marcar_descatalogadas(db, source, external_ids, antes)
         except UnsupportedFetchMode:
             # No es una falla: es una fuente cuyo buscador no permite pedir por id
             # (Megatone/Doofinder). Marcarlo como ERROR haría que la tarea programada

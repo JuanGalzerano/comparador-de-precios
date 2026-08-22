@@ -347,7 +347,8 @@ class CompraGamerAdapter(BaseSourceAdapter):
                     brand=brand or None,
                     category=category,
                 ),
-                origin_ref=raw.origin_ref,
+                available=bool(item.get("stock")) and bool(item.get("vendible")),
+            origin_ref=raw.origin_ref,
             )
         except (ValidationError, InvalidOperation, TypeError) as exc:
             raise NormalizationError(

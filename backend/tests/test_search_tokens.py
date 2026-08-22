@@ -165,3 +165,74 @@ class TestBusquedaAflojadaEnElEndpoint:
 
         assert body["total"] == 0
         assert body["items"] == []
+
+
+class TestRelevancia:
+    """Ordenar solo por precio pone los accesorios primero: son más baratos por definición."""
+
+    def test_el_que_empieza_con_lo_buscado_va_primero(self):
+        from app.api.routers.search import _relevancia
+        assert _relevancia(["smart", "tv"]) is not None
+
+    def test_sin_tokens_no_altera_el_orden(self):
+        from app.api.routers.search import _order_by
+        assert len(_order_by("price")) == len(_order_by("price", []))
+
+    def test_con_tokens_agrega_un_criterio_adelante(self):
+        from app.api.routers.search import _order_by
+        assert len(_order_by("price", ["smart", "tv"])) == len(_order_by("price")) + 1
+
+    def test_el_criterio_elegido_sigue_mandando_dentro_del_escalon(self):
+        """La relevancia no reemplaza al orden por precio o por tiendas: lo antecede."""
+        from app.api.routers.search import _order_by
+        por_precio = _order_by("price", ["tv"])
+        por_tiendas = _order_by("retailers", ["tv"])
+        assert por_precio[1:] != por_tiendas[1:], "cada sort mantiene su criterio"
+
+
+class TestAccesorios:
+    """Un accesorio arrastra la marca y el código del producto al que sirve."""
+
+    @pytest.mark.parametrize(
+        "accesorio,producto",
+        [
+            (
+                "Cajon Vegetales Heladera Smartlife RFH260",
+                "Heladera con freezer SmartLife 252lt RFH260WH blanco",
+            ),
+            ("Soporte para Smart TV 55 Philco", "Smart TV 55 Philco 4K"),
+            ("Funda Notebook Lenovo 15", "Notebook Lenovo IdeaPad 15 8GB"),
+            ("Control Remoto Smart Tv Noblex", "Smart Tv Noblex 43 Full HD"),
+        ],
+    )
+    def test_el_accesorio_no_se_agrupa_con_el_producto(self, accesorio, producto):
+        """Caso real: el cajón y la heladera comparten `RFH260`, y la ficha anunciaba
+        un ahorro de $570.000 comparando un repuesto contra un electrodoméstico."""
+        from app.matching.matcher import _conflicts, fingerprint
+
+        assert _conflicts(fingerprint(accesorio), fingerprint(producto))
+
+    @pytest.mark.parametrize(
+        "uno,otro",
+        [
+            ("Smart TV 55 Philco 4K", "Smart Tv Philco 55 Pulgadas 4K"),
+            (
+                "Heladera Drean 277 lt HDR280F50B",
+                "Heladera Drean HDR280F50B Ciclica 277 L Blanca",
+            ),
+        ],
+    )
+    def test_dos_productos_de_verdad_siguen_agrupandose(self, uno, otro):
+        """La guarda no puede volverse tan estricta que rompa lo que ya funcionaba."""
+        from app.matching.matcher import _conflicts, fingerprint
+
+        assert not _conflicts(fingerprint(uno), fingerprint(otro))
+
+    def test_dos_accesorios_del_mismo_tipo_si_se_comparan(self):
+        """Dos soportes de TV entre tiendas distintas SON comparables entre sí."""
+        from app.matching.matcher import _conflicts, fingerprint
+
+        assert not _conflicts(
+            fingerprint("Soporte para Smart TV 55 Philco"),
+            fingerprint("Soporte Smart TV Philco 55 pulgadas"),
+        )

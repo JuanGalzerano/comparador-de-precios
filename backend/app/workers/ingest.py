@@ -153,6 +153,10 @@ def _listing_fields(normalized: NormalizedListingInput) -> dict[str, Any]:
         # quedaba muerta.
         "catalog_product_id": _fit(hint.catalog_product_id if hint else None, 64),
         "fetched_at": normalized.fetched_at,
+        # Disponibilidad. Se sella la fecha en que dejo de poder comprarse y se limpia
+        # sola cuando la tienda repone. `_upsert_listing` respeta la fecha anterior si
+        # ya estaba marcada, para no perder desde cuando esta caida.
+        "unavailable_since": None if normalized.available else normalized.fetched_at,
     }
 
 
@@ -204,6 +208,13 @@ def _upsert_listing(
 
     old_price = existing.price
     old_shipping = existing.shipping_cost
+
+    # Si ya estaba marcada como no disponible y sigue sin estarlo, se conserva la fecha
+    # original: interesa saber desde CUANDO no se puede comprar, no cuando fue la ultima
+    # vez que lo confirmamos.
+    if fields["unavailable_since"] is not None and existing.unavailable_since is not None:
+        fields["unavailable_since"] = existing.unavailable_since
+
     for key, value in fields.items():
         setattr(existing, key, value)
     db.flush()

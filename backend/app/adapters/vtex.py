@@ -350,6 +350,15 @@ class VtexAdapter(BaseSourceAdapter):
                 origin_ref=raw.origin_ref,
             )
 
+        # Disponibilidad: alcanza con que UN seller tenga stock. Un producto sin ninguno
+        # sigue en el catalogo de la tienda con su precio viejo — ver
+        # `NormalizedListingInput.available`.
+        disponible = any(
+            ((seller.get("commertialOffer") or {}).get("AvailableQuantity") or 0) > 0
+            for item in (p.get("items") or [])
+            for seller in (item.get("sellers") or [])
+        )
+
         brand_name = (p.get("brand") or None) or None
 
         # installments: primer item, primer seller, la opción sin interés con más cuotas
@@ -389,6 +398,7 @@ class VtexAdapter(BaseSourceAdapter):
                 reviews_count=None,
                 warranty_months=None,
                 warranty_type=WarrantyType.UNKNOWN,
+                available=disponible,
                 product_hint=ProductHint(brand=brand_name),
                 origin_ref=raw.origin_ref,
             )

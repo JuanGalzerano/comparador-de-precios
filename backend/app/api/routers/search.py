@@ -35,7 +35,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Query
-from sqlalchemy import ColumnElement, and_, case, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, func, literal, or_, select
 
 from app.api.deps import DbSession
 from app.enums import ItemCondition
@@ -125,7 +125,47 @@ def _ml_live_search(query: str, limit: int) -> list[ProductClusterOut]:
 SearchSort = Literal["price", "retailers", "spread"]
 
 
-def _order_by(sort: SearchSort) -> list[ColumnElement[Any]]:
+def _escapar_like(texto: str) -> str:
+    """`%` y `_` del usuario son comodines de LIKE: sin escaparlos, buscar "50%" matchea
+    cualquier cosa que empiece con 50 y "a_b" matchea "axb"."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _relevancia(tokens: list[str]) -> ColumnElement[Any]:
+    """Qué tan bien responde un producto a lo que se buscó. Menor es mejor.
+
+    Ordenar solo por precio da un resultado absurdo: buscando "smart tv", un **soporte**
+    de smart tv a $8.000 le gana a un televisor de $600.000. El accesorio es más barato
+    por definición, así que siempre sale primero.
+
+    La señal que los separa es dónde arranca el título. Un televisor se llama "Smart TV
+    55 Philco"; un soporte se llama "Soporte para Smart TV" — menciona lo buscado, pero
+    no empieza con eso. Los accesorios casi siempre anteponen su propio sustantivo:
+    soporte, funda, cable, adaptador.
+
+    Tres escalones:
+
+    0. El título empieza con la búsqueda completa ("smart tv...").
+    1. El título empieza con la primera palabra ("smart...").
+    2. Todo lo demás: lo menciona, pero en el medio.
+
+    Dentro de cada escalón sigue mandando el criterio elegido (precio, tiendas, spread),
+    así que no se pierde nada de lo anterior: el más barato de los televisores de verdad
+    queda primero.
+    """
+    if not tokens:
+        return literal(0)
+
+    frase = _escapar_like(" ".join(tokens))
+    primera = _escapar_like(tokens[0])
+    return case(
+        (Product.canonical_title.ilike(f"{frase}%", escape="\\"), 0),
+        (Product.canonical_title.ilike(f"{primera}%", escape="\\"), 1),
+        else_=2,
+    )
+
+
+def _order_by(sort: SearchSort, tokens: list[str] | None = None) -> list[ColumnElement[Any]]:
     """Orden del listado de clusters.
 
     - `price` (default): el cluster más barato primero, el orden histórico.
@@ -133,16 +173,24 @@ def _order_by(sort: SearchSort) -> list[ColumnElement[Any]]:
       es donde el comparador realmente sirve.
     - `spread`: mayor diferencia entre la publicación más cara y la más barata del
       mismo producto: donde elegir bien ahorra más plata.
+
+    Cuando hay término de búsqueda, la relevancia manda por encima de todo: ver
+    `_relevancia`.
     """
     cheapest = func.min(Listing.final_price)
     retailers = func.count(func.distinct(Listing.retailer_source_id))
     spread = func.max(Listing.final_price) - func.min(Listing.final_price)
 
     if sort == "retailers":
-        return [retailers.desc(), spread.desc(), Product.id.asc()]
-    if sort == "spread":
-        return [spread.desc(), retailers.desc(), Product.id.asc()]
-    return [cheapest.asc(), Product.id.asc()]
+        criterio = [retailers.desc(), spread.desc(), Product.id.asc()]
+    elif sort == "spread":
+        criterio = [spread.desc(), retailers.desc(), Product.id.asc()]
+    else:
+        criterio = [cheapest.asc(), Product.id.asc()]
+
+    if tokens:
+        return [_relevancia(tokens).asc(), *criterio]
+    return criterio
 
 
 def _build_filters(
@@ -159,7 +207,13 @@ def _build_filters(
     los mismos, o el `best_score` quedaria calculado sobre un set distinto del que
     dice `listing_count`.
     """
-    filters: list[ColumnElement[bool]] = []
+    filters: list[ColumnElement[bool]] = [
+        # Lo que no se puede comprar no entra a la comparacion. Las tiendas dejan
+        # productos descontinuados en su catalogo con el precio de hace anios — Jumbo
+        # publica un LED 50" a $13.499 sin stock — y como se ordena por precio, esos
+        # zombis aparecian como la mejor oferta del sitio.
+        Listing.unavailable_since.is_(None),
+    ]
     if condition != "all":
         filters.append(Listing.condition == ItemCondition(condition))
     if category:
@@ -467,6 +521,9 @@ def search(
             )
         return stmt
 
+    # Los tokens mandan dos cosas: qué se filtra y cómo se ordena. Cuando la cascada
+    # afloja la búsqueda, la relevancia tiene que seguir a los tokens que ganaron.
+    tokens_activos = _tokenize(q) if q and q.strip() else []
     filters = _build_filters(q=q, category=category, condition=condition)
     agg_stmt = _agregado(filters)
     total = db.execute(select(func.count()).select_from(agg_stmt.subquery())).scalar_one()
@@ -487,12 +544,15 @@ def search(
             ).scalar_one()
             if encontrados:
                 agg_stmt, total, filters = candidato, encontrados, filtros_aflojados
+                tokens_activos = tokens
                 relaxed_query = " ".join(tokens)
                 logger.info("busqueda aflojada: %r -> %r (%s resultados)", q, relaxed_query, total)
                 break
 
     page_stmt = (
-        agg_stmt.order_by(*_order_by(sort)).limit(page_size).offset((page - 1) * page_size)
+        agg_stmt.order_by(*_order_by(sort, tokens_activos))
+        .limit(page_size)
+        .offset((page - 1) * page_size)
     )
     agg_rows = db.execute(page_stmt).all()
 

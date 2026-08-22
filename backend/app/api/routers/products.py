@@ -106,7 +106,9 @@ def get_product(
     product = _get_product_or_404(db, product_id)
 
     all_listings = db.scalars(
-        select(Listing).where(Listing.product_id == product_id).order_by(Listing.id.asc())
+        select(Listing)
+        .where(Listing.product_id == product_id, Listing.unavailable_since.is_(None))
+        .order_by(Listing.id.asc())
     ).all()
     visible = [
         listing
@@ -289,7 +291,9 @@ def get_similar(
     # comparte casi todos los tokens del título con el teléfono, así que entra como
     # candidato — pero a $17.000 contra $1.200.000 no es una alternativa de compra.
     own_price = db.scalar(
-        select(func.min(Listing.final_price)).where(Listing.product_id == product_id)
+        select(func.min(Listing.final_price)).where(
+            Listing.product_id == product_id, Listing.unavailable_since.is_(None)
+        )
     )
 
     items: list[SimilarProductOut] = []

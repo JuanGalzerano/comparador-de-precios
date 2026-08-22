@@ -141,6 +141,17 @@ class Listing(IdMixin, TimestampMixin, Base):
     #: Cuando se leyo de la fuente (no cuando se escribio la fila).
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
 
+    #: Desde cuando esta publicacion no se puede comprar. `None` = disponible.
+    #:
+    #: Se completa cuando la tienda la informa sin stock, y tambien cuando un refresh la
+    #: pide y la tienda ya no la devuelve (producto descatalogado). Se limpia sola si
+    #: vuelve a aparecer disponible.
+    #:
+    #: `/search` y la ficha de producto excluyen las que lo tienen. La fila NO se borra:
+    #: se conserva su historial de precios, y si la tienda repone vuelve a la comparacion
+    #: sin tener que traerla de nuevo.
+    unavailable_since: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
     # --- Relaciones --------------------------------------------------------
     product: Mapped["Product | None"] = relationship(back_populates="listings")
     retailer_source: Mapped["RetailerSource"] = relationship(back_populates="listings")

@@ -81,6 +81,8 @@ class _Fingerprint:
     model_codes: frozenset[str]
     generations: frozenset[str]
     screen_inches: float | None
+    #: Sustantivo de accesorio con el que arranca el titulo, si arranca con uno.
+    accessory: str | None
 
 
 @dataclass
@@ -98,7 +100,37 @@ def fingerprint(title: str, *, brand: str | None = None, capacity_gb: int | None
         model_codes=extract_model_codes(title),
         generations=extract_generation_numbers(title),
         screen_inches=extract_screen_inches(title),
+        accessory=_accessory_noun(title),
     )
+
+
+#: Sustantivos con los que arranca el titulo de un accesorio o repuesto.
+#:
+#: Un accesorio menciona el producto para el que sirve, y con eso arrastra su marca y su
+#: codigo de modelo — que es la senal mas fuerte que tiene el matcher. Sin esta guarda,
+#: el "Cajon Vegetales Heladera Smartlife RFH260" de OnCity ($59.839) se agrupaba con la
+#: "Heladera con freezer SmartLife 252lt RFH260WH" de Cetrogar ($629.999): mismo codigo,
+#: productos incomparables, y la ficha anunciaba un ahorro de $570.000 que no existe.
+#:
+#: La regla mira solo el PRIMER sustantivo porque ahi esta la diferencia: un accesorio se
+#: llama "Soporte para Smart TV" y un televisor se llama "Smart TV 55 Philco". El
+#: televisor no empieza con "soporte" ni el accesorio con "smart".
+_ACCESSORY_NOUNS = frozenset(
+    {
+        "cajon", "soporte", "funda", "cable", "adaptador", "repuesto", "filtro",
+        "cargador", "bateria", "correa", "estuche", "protector", "vidrio", "film",
+        "bandeja", "rejilla", "manija", "burlete", "control", "kit", "base",
+        "mochila", "maletin", "bolso", "huevera", "organizador", "tapa", "perilla",
+        "carbon", "bolsa", "manguera", "termostato", "resistencia", "motor",
+    }
+)
+
+
+def _accessory_noun(title: str) -> str | None:
+    """El sustantivo de accesorio con el que empieza el titulo, si empieza con uno."""
+    for palabra in normalize_text(title).split():
+        return palabra if palabra in _ACCESSORY_NOUNS else None
+    return None
 
 
 def _conflicts(a: _Fingerprint, b: _Fingerprint) -> bool:
@@ -135,6 +167,10 @@ def _conflicts(a: _Fingerprint, b: _Fingerprint) -> bool:
     # los sets son disjuntos sin que los productos lo sean. Por eso el conflicto exige
     # que ninguno de los códigos de un lado aparezca dentro de un código del otro.
     if a.model_codes and b.model_codes and not _codes_overlap(a.model_codes, b.model_codes):
+        return True
+    # Un accesorio y el producto al que sirve comparten marca y codigo, pero no son
+    # comparables. Ver `_ACCESSORY_NOUNS`.
+    if a.accessory != b.accessory:
         return True
     return False
 

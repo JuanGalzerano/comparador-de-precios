@@ -353,6 +353,18 @@ class NormalizedListingInput(BaseModel):
     warranty_months: int | None = Field(default=None, ge=0)
     warranty_type: WarrantyType = WarrantyType.UNKNOWN
 
+    # --- Disponibilidad ----------------------------------------------------
+    #: `False` = la publicacion existe pero no se puede comprar (sin stock, pausada).
+    #:
+    #: No alcanza con no emitirla: las tiendas dejan productos descontinuados en su
+    #: catalogo con el precio de hace anios. Jumbo publica un Philips 43" a $54.999 y un
+    #: LED 50" a $13.499, ambos con `AvailableQuantity: 0`. Como el comparador ordena por
+    #: precio, esos zombis ganaban siempre y aparecian como la mejor oferta del sitio.
+    #:
+    #: Se guarda en vez de descartarse para que el historial de precios siga completo y
+    #: para que, si la tienda repone, la publicacion vuelva sola a la comparacion.
+    available: bool = True
+
     # --- Producto y trazabilidad -------------------------------------------
     product_hint: ProductHint = Field(default_factory=ProductHint)
     fetched_at: datetime = Field(default_factory=_utcnow)
